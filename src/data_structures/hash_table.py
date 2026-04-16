@@ -38,6 +38,12 @@ class PetProfile:
             ValueError: 年龄或体重为负数时抛出
             ValueError: 性别取值不合法时抛出
         """
+        # 类型检查
+        if not isinstance(age, (int, float)):
+            raise TypeError(f"年龄必须是数字，收到 {type(age).__name__}")
+        if not isinstance(weight, (int, float)):
+            raise TypeError(f"体重必须是数字，收到 {type(weight).__name__}")
+        
         # 数据校验
         if age < 0:
             raise ValueError(f"年龄不能为负数：{age}")
@@ -169,6 +175,10 @@ class PetProfileManager:
         
         for key, value in kwargs.items():
             if hasattr(pet, key):
+                # 类型检查
+                if key in ["age", "weight"] and not isinstance(value, (int, float)):
+                    raise TypeError(f"{key} 必须是数字，收到 {type(value).__name__}")
+                
                 # 特殊字段校验
                 if key == "age" and value < 0:
                     raise ValueError(f"年龄不能为负数：{value}")
