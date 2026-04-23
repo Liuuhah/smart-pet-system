@@ -379,9 +379,9 @@ class TestPetProfileManager(unittest.TestCase):
         
         str_repr = str(self.manager)
         
-        self.assertIn("🟢", str_repr)  # active
-        self.assertIn("⚫", str_repr)  # inactive
-        self.assertIn("🔴", str_repr)  # lost
+        self.assertIn("[A]", str_repr)  # active
+        self.assertIn("[I]", str_repr)  # inactive
+        self.assertIn("[L]", str_repr)  # lost
 
 
 if __name__ == '__main__':

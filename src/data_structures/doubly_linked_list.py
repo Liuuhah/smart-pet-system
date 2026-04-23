@@ -10,6 +10,15 @@
 - 新记录频繁添加到尾部，链表O(1)优于数组O(n)
 - 反向遍历查看最近记录是高频操作
 - 支持动态插入和删除，比数组灵活
+
+---
+【病历本】
+核心作用：记录每一只宠物的健康历史（疫苗、体检、生病等）。
+数据结构：双向链表 (Doubly Linked List)。
+为什么用它：
+时间顺序：病历是按时间发生的，链表天然适合这种前后相连的关系。
+反向查看：医生（用户）通常最关心“最近几次”的情况，双向链表可以从后往前翻（traverse_backward），效率极高。
+
 """
 
 import re
@@ -414,11 +423,11 @@ class DoublyLinkedList:
         
         for i, record in enumerate(records, 1):
             severity_icon = {
-                "low": "🟢",
-                "medium": "🟡",
-                "high": "🟠",
-                "critical": "🔴"
-            }.get(record["severity"], "⚪")
+                "low": "[L]",
+                "medium": "[M]",
+                "high": "[H]",
+                "critical": "[C]"
+            }.get(record["severity"], "[?]")
             
             lines.append(f"  {i}. {severity_icon} [{record['date']}] {record['type']}: {record['desc']}")
         

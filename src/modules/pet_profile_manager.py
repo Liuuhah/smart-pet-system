@@ -16,6 +16,17 @@
 数据结构应用：
 - 哈希表（PetProfileManager）：O(1) 快速检索宠物档案
 - 双向链表（DoublyLinkedList）：O(n) 健康记录时间线管理
+
+---
+【前台接待员】
+核心作用：把“档案柜”和“病历本”结合起来，提供具体的服务。
+功能：
+注册 (register_pet)：在档案柜里建个新号，并给发一本空白的病历本。
+添加记录 (add_health_record)：往病历本里写新的一页。
+搜索与更新：帮你在档案柜里找宠物，或者修改它们的年龄体重。
+工程亮点：它体现了“显式资源释放”，当删除一只宠物时，它会先销毁病历本再注销档案，非常严谨。
+
+
 """
 
 import sys
@@ -49,7 +60,7 @@ class SmartPetProfileSystem:
         self.profile_manager = PetProfileManager()
     
     def register_pet(self, pet_id: str, name: str, breed: str, age: float, 
-                     weight: float, gender: str = "unknown") -> PetProfile:
+                     weight: float, gender: str = "unknown", species: str = "dog") -> PetProfile:
         """
         注册新宠物，自动初始化健康时间线
         
@@ -63,6 +74,7 @@ class SmartPetProfileSystem:
             age: 年龄（岁）
             weight: 体重（公斤）
             gender: 性别，"male" / "female" / "unknown"，默认 "unknown"
+            species: 物种，"cat" / "dog" / "other"，默认 "dog"
         
         Returns:
             PetProfile: 创建成功的宠物档案对象
@@ -76,13 +88,13 @@ class SmartPetProfileSystem:
             ✓ 成功注册宠物：小白 (金毛犬, 2岁, 25.5kg, 公)
         """
         # 创建宠物档案（PetProfile 内部会自动创建 DoublyLinkedList）
-        pet = PetProfile(pet_id, name, breed, age, weight, gender)
+        pet = PetProfile(pet_id, name, breed, age, weight, gender, species)
         pet.health_timeline = DoublyLinkedList()  # 为每个宠物初始化健康时间线
         
         # 添加到哈希表
         self.profile_manager.add_pet(pet)
         
-        print(f"✓ 成功注册宠物：{pet}")
+        print(f"[OK] 成功注册宠物：{pet}")
         return pet
     
     def add_health_record(self, pet_id: str, date: str, event_type: str, 
@@ -116,20 +128,20 @@ class SmartPetProfileSystem:
         # 查找宠物
         pet = self.profile_manager.get_pet(pet_id)
         if not pet:
-            print(f"✗ 错误：找不到宠物 ID '{pet_id}'")
+            print(f"[ERR] 错误：找不到宠物 ID '{pet_id}'")
             return False
         
         try:
             # 创建健康记录节点（HealthRecordNode 内部会校验日期格式）
             record = HealthRecordNode(date, event_type, description, severity, details)
         except ValueError as e:
-            print(f"✗ 添加失败：{e}")
+            print(f"[ERR] 添加失败：{e}")
             return False
         
         # 添加到健康时间线
         pet.health_timeline.append(record)
         
-        print(f"✓ 已为 {pet.name} 添加健康记录：{description}")
+        print(f"[OK] 已为 {pet.name} 添加健康记录：{description}")
         return True
     
     def view_recent_records(self, pet_id: str, count: int = 5) -> list:
@@ -158,7 +170,7 @@ class SmartPetProfileSystem:
         # 查找宠物
         pet = self.profile_manager.get_pet(pet_id)
         if not pet:
-            print(f"✗ 错误：找不到宠物 ID '{pet_id}'")
+            print(f"[ERR] 错误：找不到宠物 ID '{pet_id}'")
             return []
         
         # 反向遍历获取最近记录
@@ -170,14 +182,14 @@ class SmartPetProfileSystem:
             print("  暂无健康记录")
         else:
             severity_icon = {
-                "low": "🟢",
-                "medium": "🟡",
-                "high": "🟠",
-                "critical": "🔴"
+                "low": "[L]",
+                "medium": "[M]",
+                "high": "[H]",
+                "critical": "[C]"
             }
             
             for i, record in enumerate(records, 1):
-                icon = severity_icon.get(record["severity"], "⚪")
+                icon = severity_icon.get(record["severity"], "[?]")
                 print(f"  {i}. {icon} [{record['date']}] {record['type']}: {record['desc']}")
         
         return records
@@ -209,7 +221,7 @@ class SmartPetProfileSystem:
         # 查找宠物
         pet = self.profile_manager.get_pet(pet_id)
         if not pet:
-            print(f"✗ 错误：找不到宠物 ID '{pet_id}'")
+            print(f"[ERR] 错误：找不到宠物 ID '{pet_id}'")
             return []
         
         # 打印时间线
@@ -246,10 +258,10 @@ class SmartPetProfileSystem:
             print(f"\n找到 {len(results)} 只匹配的宠物：")
             for pet in results:
                 status_icon = {
-                    "active": "🟢",
-                    "inactive": "⚫",
-                    "lost": "🔴"
-                }.get(pet.status, "⚪")
+                    "active": "[A]",
+                    "inactive": "[I]",
+                    "lost": "[L]"
+                }.get(pet.status, "[?]")
                 print(f"  {status_icon} {pet}")
         else:
             print(f"未找到名字包含 '{keyword}' 的宠物")
@@ -283,10 +295,10 @@ class SmartPetProfileSystem:
             print(f"\n找到 {len(results)} 只品种包含 '{keyword}' 的宠物：")
             for pet in results:
                 status_icon = {
-                    "active": "🟢",
-                    "inactive": "⚫",
-                    "lost": "🔴"
-                }.get(pet.status, "⚪")
+                    "active": "[A]",
+                    "inactive": "[I]",
+                    "lost": "[L]"
+                }.get(pet.status, "[?]")
                 print(f"  {status_icon} {pet.name} - {pet.breed}")
         else:
             print(f"未找到品种包含 '{keyword}' 的宠物")
@@ -319,16 +331,16 @@ class SmartPetProfileSystem:
         try:
             self.profile_manager.update_pet(pet_id, **kwargs)
             pet = self.profile_manager.get_pet(pet_id)
-            print(f"✓ 已更新宠物 {pet.name} 的信息")
+            print(f"[OK] 已更新宠物 {pet.name} 的信息")
             return True
         except ValueError as e:
-            print(f"✗ 更新失败：{e}")
+            print(f"[ERR] 更新失败：{e}")
             return False
         except TypeError as e:
-            print(f"✗ 更新失败：{e}")
+            print(f"[ERR] 更新失败：{e}")
             return False
         except AttributeError as e:
-            print(f"✗ 更新失败：{e}")
+            print(f"[ERR] 更新失败：{e}")
             return False
     
     def remove_pet(self, pet_id: str) -> bool:
@@ -355,7 +367,7 @@ class SmartPetProfileSystem:
         # 查找宠物
         pet = self.profile_manager.get_pet(pet_id)
         if not pet:
-            print(f"✗ 错误：找不到宠物 ID '{pet_id}'")
+            print(f"[ERR] 错误：找不到宠物 ID '{pet_id}'")
             return False
         
         # 显式释放资源：清空健康时间线
@@ -367,7 +379,7 @@ class SmartPetProfileSystem:
         # 从哈希表中删除
         self.profile_manager.remove_pet(pet_id)
         
-        print(f"✓ 已删除宠物 {pet_name} 及其所有健康记录")
+        print(f"[OK] 已删除宠物 {pet_name} 及其所有健康记录")
         return True
     
     def show_all_pets(self) -> list:

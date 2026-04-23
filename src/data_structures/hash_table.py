@@ -14,6 +14,14 @@
 - Python 的 dict 底层就是哈希表实现
 - 提供 O(1) 的查找、插入、删除效率
 - 冲突解决：Python dict 使用开放寻址法 + 伪随机探测
+
+---
+【档案柜】
+核心作用：定义了宠物的基本样子（PetProfile）以及如何快速找到它们（PetProfileManager）。
+数据结构：哈希表 (Hash Table)。
+为什么用它：当你输入 pet001 时，它能瞬间（O(1) 复杂度）告诉你这只宠物的名字、年龄、体重以及它是猫还是狗（species 字段）。
+关键改动：最近我们给它增加了 species 字段，让它能区分“猫咪”和“狗狗”，为后续的细分赛道做准备。
+
 """
 
 from datetime import datetime
@@ -22,7 +30,7 @@ from datetime import datetime
 class PetProfile:
     """宠物档案类"""
     
-    def __init__(self, pet_id, name, breed, age, weight, gender="unknown"):
+    def __init__(self, pet_id, name, breed, age, weight, gender="unknown", species="unknown"):
         """
         初始化宠物档案
         
@@ -33,10 +41,12 @@ class PetProfile:
             age: 年龄（岁）
             weight: 体重（公斤）
             gender: 性别，"male" / "female" / "unknown"，默认 "unknown"
+            species: 物种，"cat" (猫咪) / "dog" (狗狗) / "other" (其他)，默认 "unknown"
         
         Raises:
             ValueError: 年龄或体重为负数时抛出
             ValueError: 性别取值不合法时抛出
+            ValueError: 物种取值不合法时抛出
         """
         # 类型检查
         if not isinstance(age, (int, float)):
@@ -54,12 +64,17 @@ class PetProfile:
         if gender not in valid_genders:
             raise ValueError(f"性别错误：'{gender}'，必须是 {valid_genders} 之一")
         
+        valid_species = ["cat", "dog", "other", "unknown"]
+        if species not in valid_species:
+            raise ValueError(f"物种错误：'{species}'，必须是 {valid_species} 之一")
+        
         self.pet_id = pet_id
         self.name = name
         self.breed = breed
         self.age = age
         self.weight = weight
         self.gender = gender
+        self.species = species
         
         # 扩展字段
         self.allergies = []                    # 过敏源列表
@@ -69,10 +84,12 @@ class PetProfile:
         self.status = "active"                 # 状态："active" / "inactive" / "lost"
     
     def __str__(self):
-        """字符串表示：名字 (品种, 年龄岁, 体重kg, 性别)"""
+        """字符串表示：名字 (品种, 物种, 年龄岁, 体重kg, 性别)"""
         gender_map = {"male": "公", "female": "母", "unknown": "未知"}
+        species_map = {"cat": "猫", "dog": "狗", "other": "其他", "unknown": "未知"}
         gender_str = gender_map.get(self.gender, "未知")
-        return f"{self.name} ({self.breed}, {self.age}岁, {self.weight}kg, {gender_str})"
+        species_str = species_map.get(self.species, "未知")
+        return f"{self.name} ({self.breed}, {species_str}, {self.age}岁, {self.weight}kg, {gender_str})"
     
     def __repr__(self):
         """详细表示（用于调试）"""
@@ -313,10 +330,10 @@ class PetProfileManager:
         
         for pet in self.profiles.values():
             status_icon = {
-                "active": "🟢",
-                "inactive": "⚫",
-                "lost": "🔴"
-            }.get(pet.status, "⚪")
+                "active": "[A]",
+                "inactive": "[I]",
+                "lost": "[L]"
+            }.get(pet.status, "[?]")
             
             lines.append(f"  {status_icon} ID: {pet.pet_id} | {pet}")
         
