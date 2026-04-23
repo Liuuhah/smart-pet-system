@@ -4,7 +4,7 @@ import time
 import http.client
 from urllib.parse import urlparse
 import re
-from tools import tools
+from ai_assistant.tools import tools
 
 class ChatCompressClient:
     def __init__(self):

@@ -42,11 +42,14 @@ sys.path.insert(0, str(project_root))
 from ai_assistant.chat_compress_client import ChatCompressClient
 
 # 配置日志
+log_dir = project_root / 'logs'
+log_dir.mkdir(exist_ok=True)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('logs/pet_health_advisor.log', encoding='utf-8'),
+        logging.FileHandler(log_dir / 'pet_health_advisor.log', encoding='utf-8'),
         logging.StreamHandler()
     ]
 )
