@@ -17,9 +17,22 @@ class ChatCompressClient:
         self.tools = self._register_tools()
         
         # 压缩配置
-        self.max_rounds = 4  # 最大对话轮数
-        self.max_context_tokens = 3000  # 最大上下文token数
+        self.max_rounds = 5  # 最大对话轮数
+        self.max_context_tokens = 262144  # 最大上下文token数
         self.compress_ratio = 0.7  # 压缩前70%的内容
+        
+        # 压缩控制标志
+        self.skip_next_compress = False  # 单次跳过标志（只对下一次有效）
+        self.auto_compress_enabled = True  # 全局自动压缩开关
+        
+        # 关键信息提取配置
+        self.auto_extract_enabled = True  # 自动提取开关
+        self.skip_next_extract = False    # 单次跳过标志
+        self.extract_interval = 5         # 提取间隔（每5轮对话）
+        self.log_file_path = r"D:\chat-log\log.txt"  # 日志文件路径
+        
+        # 日志模式配置
+        self.debug_mode = False  # 全局日志模式开关
     
     def _register_tools(self):
         """注册可用工具"""
@@ -137,7 +150,7 @@ class ChatCompressClient:
                 "type": "function",
                 "function": {
                     "name": "curl",
-                    "description": "通过curl访问网页，并返回网页内容",
+                    "description": "通过HTTP请求访问网页，并返回网页内容。查询wttr.in天气时：\n1. 必须使用英文城市名（如Chengdu、Beijing），不要使用中文\n2. 必须添加 format=j1 参数获取JSON格式数据\n3. 完整格式：https://wttr.in/{城市英文名}?format=j1\n示例：https://wttr.in/Chengdu?format=j1",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -147,6 +160,40 @@ class ChatCompressClient:
                             }
                         },
                         "required": ["url"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "search_chat_history",
+                    "description": "搜索聊天历史记录。聊天记录保存在日志文件中，每5轮对话会自动提取关键信息。当用户询问之前的对话内容、历史记录时使用此工具。",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": {
+                                "type": "string",
+                                "description": "搜索关键词或查询描述。示例：'第一条历史'、'篮球相关'、'查找历史'、'我之前说过什么'。如果是通用查询（如'查找历史'、'第一条记录'），请传入用户的原始问题。如果是特定关键词搜索，请传入具体的搜索词。"
+                            }
+                        },
+                        "required": ["query"]
+                    }
+                }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "anythingllm_query",
+                    "description": "查询本地文档仓库/知识库。当用户提到'文档仓库'、'文件仓库'、'知识库'、'查找文档'等关键词时使用此工具。可以回答关于已上传文档的问题。\n\n重要提示：\n- 只返回与用户问题直接相关的文档内容\n- 如果检索到多个文档，优先展示最相关的1-2个\n- 对于明显不相关的文档（如文学作品与技术问题），不要展示\n- 如果答案已经足够完整，不需要列出所有来源文档",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "message": {
+                                "type": "string",
+                                "description": "要查询的问题，例如：'公司请假政策是什么？'、'项目文档在哪里？'"
+                            }
+                        },
+                        "required": ["message"]
                     }
                 }
             }
@@ -182,6 +229,16 @@ class ChatCompressClient:
         elif tool_name == "curl":
             return tools.curl(
                 tool_args.get("url")
+            )
+        elif tool_name == "search_chat_history":
+            return tools.search_chat_history(
+                tool_args.get("query"),
+                debug=self.debug_mode
+            )
+        elif tool_name == "anythingllm_query":
+            return tools.anythingllm_query(
+                tool_args.get("message"),
+                debug=self.debug_mode
             )
         return {"error": f"未知工具: {tool_name}"}
     
@@ -234,6 +291,16 @@ class ChatCompressClient:
     
     def _should_compress(self):
         """检查是否需要压缩聊天记录"""
+        # 优先检查全局自动压缩开关
+        if not self.auto_compress_enabled:
+            return False
+        
+        # 检查单次跳过标志
+        if self.skip_next_compress:
+            self.skip_next_compress = False  # 重置标志
+            print("\n[压缩跳过] 用户选择跳过本次压缩")
+            return False
+        
         rounds = self._count_rounds()
         context_tokens = self._get_context_tokens()
         
@@ -287,10 +354,10 @@ class ChatCompressClient:
         summary = self._summarize_conversation(compress_text)
         
         if summary:
-            # 创建压缩后的摘要消息
+            # 创建压缩后的摘要消息（改为 user 角色，避免连续 system 导致 Jinja 模板错误）
             compressed_message = {
-                'role': 'system',
-                'content': f"【历史对话摘要】\n{summary}\n\n【说明】以上是之前对话的摘要，以下是最近的对话内容："
+                'role': 'user',
+                'content': f"【之前的对话摘要】\n{summary}\n\n请基于以上背景继续对话。"
             }
             
             # 更新聊天历史：摘要 + 保留的最近消息
@@ -300,6 +367,42 @@ class ChatCompressClient:
             print(f"[压缩效果] 保留了最近{keep_count}条原始消息")
         else:
             print("[压缩失败] LLM总结失败，保持原聊天记录")
+    
+    def _clean_message_sequence(self, messages):
+        """清理消息序列，避免连续相同角色的消息导致 LM Studio Jinja 模板错误
+        
+        LM Studio 要求：
+        1. 不能有两个连续的 system 消息
+        2. 不能有两个连续的 user 消息  
+        3. 不能有两个连续的 assistant 消息
+        
+        处理策略：合并连续的同角色消息
+        """
+        if not messages:
+            return []
+        
+        cleaned = []
+        
+        for msg in messages:
+            role = msg.get('role')
+            
+            # 跳过空的 system 消息
+            if role == 'system' and not msg.get('content', '').strip():
+                continue
+            
+            # 如果当前消息与前一个消息角色相同
+            if cleaned and cleaned[-1].get('role') == role:
+                if role in ['user', 'assistant', 'system']:
+                    # 合并连续的同角色消息
+                    prev_content = cleaned[-1].get('content', '')
+                    curr_content = msg.get('content', '')
+                    cleaned[-1]['content'] = prev_content + '\n\n' + curr_content
+                    print(f"[消息清理] 合并两个连续的 {role} 消息")
+            else:
+                # 创建消息的副本，避免修改原始数据
+                cleaned.append(msg.copy())
+        
+        return cleaned
     
     def _summarize_conversation(self, conversation_text):
         """调用LLM对对话内容进行总结"""
@@ -337,7 +440,7 @@ class ChatCompressClient:
                     {'role': 'system', 'content': '你是一个专业的对话总结助手。请直接输出总结内容，不要输出任何思考过程。'},
                     {'role': 'user', 'content': prompt}
                 ],
-                'max_tokens': 262144,
+                'max_tokens': 512,
                 'temperature': 0.3,
                 'stream': False
             }
@@ -399,7 +502,7 @@ class ChatCompressClient:
                     if draft_match:
                         draft_text = draft_match.group(1).strip()
                         # 提取其中的中文部分
-                        chinese_parts = re.findall(r'[\u4e00-\u9fff][\u4e00-\u9fff，。！？；：""''（）\s]*', draft_text)
+                        chinese_parts = re.findall(r'[\u4e00-\u9fff][\u4e00-\u9fff，。！？；：""''（）\\s]*', draft_text)
                         if chinese_parts:
                             summary = ''.join(chinese_parts).strip()
                             print(f"[调试] 从Draft中提取到: '{summary}'")
@@ -445,8 +548,12 @@ class ChatCompressClient:
             print(traceback.format_exc())
             return None
     
-    def send_request_stream(self, prompt, max_tokens=262144, debug=False):
+    def send_request_stream(self, prompt, max_tokens=4096, debug=None):
         """发送流式请求，实时输出回复内容（带自动压缩功能）"""
+        # 优先使用类的 debug_mode，如果参数为 None 则使用默认值
+        if debug is None:
+            debug = self.debug_mode
+            
         # 在发送新请求前，检查是否需要压缩
         if self._should_compress():
             self._compress_chat_history()
@@ -481,6 +588,16 @@ class ChatCompressClient:
     
     def _send_single_stream(self, prompt, max_tokens, debug, is_first_round):
         """发送单次流式请求，返回(内容, 是否有工具调用)"""
+        if debug:
+            print(f"\n{'='*60}")
+            print(f"[调试] 开始发送流式请求")
+            print(f"[调试] 模型: {self.model}")
+            print(f"[调试] BASE_URL: {self.base_url}")
+            print(f"[调试] Host: {self.host}")
+            print(f"[调试] Path: {self.path}")
+            print(f"[调试] Token存在: {'是' if self.token else '否'}")
+            print(f"{'='*60}\n")
+        
         if self.base_url.startswith('https://'):
             conn = http.client.HTTPSConnection(self.host)
         else:
@@ -492,13 +609,38 @@ class ChatCompressClient:
         if self.token:
             headers['Authorization'] = f'Bearer {self.token}'
         
+        if debug:
+            print(f"[调试] 请求头: {headers}")
+        
+        # 清理消息序列，避免连续相同角色的消息导致 Jinja 模板错误
+        cleaned_history = self._clean_message_sequence(self.chat_history)
+        
+        # 检查最后一条消息是否已经是当前用户的prompt，避免重复
+        messages_list = [
+            {'role': 'system', 'content': '''你是一个友好的AI助手，具有以下能力：
+1. 文件操作：列出目录、读写文件、重命名、删除
+2. 网页访问：使用 curl 工具访问网页
+3. 知识库查询：当用户提到"文档仓库"、"文件仓库"、"知识库"、"查找文档"时，使用 anythingllm_query 工具查询本地文档
+
+重要提示：
+- 如果用户询问关于公司内部文档、政策、项目资料等问题，优先使用 anythingllm_query 工具
+- 如果用户询问通用知识，直接回答即可
+- 工具调用失败时，尝试其他方法或告知用户
+- 从知识库返回结果时，只展示与问题直接相关的内容，过滤掉明显不相关的文档'''}
+        ]
+        
+        # 只有当chat_history的最后一条不是当前prompt时，才添加prompt
+        if cleaned_history and cleaned_history[-1].get('role') == 'user' and cleaned_history[-1].get('content') == prompt:
+            # 最后一条已经是当前用户消息，不需要再添加
+            messages_list.extend(cleaned_history)
+        else:
+            # 需要添加当前用户消息
+            messages_list.extend(cleaned_history)
+            messages_list.append({'role': 'user', 'content': prompt})
+        
         data = {
             'model': self.model,
-            'messages': [
-                {'role': 'system', 'content': '你是一个友好的AI助手，具有文件操作能力。当用户需要进行文件操作时，请使用工具调用格式。'},
-                *self.chat_history,
-                {'role': 'user', 'content': prompt}
-            ],
+            'messages': messages_list,
             'tools': self.tools,
             'tool_choice': 'auto',
             'max_tokens': max_tokens,
@@ -506,8 +648,40 @@ class ChatCompressClient:
             'stream': True
         }
         
-        conn.request('POST', f'{self.path}/chat/completions', json.dumps(data), headers)
-        response = conn.getresponse()
+        if debug:
+            print(f"[调试] 请求数据大小: {len(json.dumps(data))} 字节")
+            print(f"[调试] 消息数量: {len(data['messages'])}")
+            print(f"[调试] 是否使用流式: {data['stream']}")
+        
+        try:
+            if debug:
+                print(f"[调试] 正在发送请求到: {self.path}/chat/completions ...")
+            request_start = time.time()
+            conn.request('POST', f'{self.path}/chat/completions', json.dumps(data), headers)
+            response = conn.getresponse()
+            request_end = time.time()
+            
+            if debug:
+                print(f"[调试] 响应状态码: {response.status}")
+                print(f"[调试] 响应头: {dict(response.getheaders())}")
+                print(f"[调试] 请求耗时: {request_end - request_start:.2f}秒")
+            
+            if response.status != 200:
+                error_body = response.read().decode('utf-8', errors='ignore')
+                if debug:
+                    print(f"[调试] 错误响应体: {error_body[:500]}")
+                print(f"[错误] API返回非200状态码: {response.status}")
+                return "", False
+        
+        except Exception as e:
+            import traceback
+            print(f"[错误] 发送请求时发生异常!")
+            print(f"[错误] 异常类型: {type(e).__name__}")
+            print(f"[错误] 异常信息: {e}")
+            if debug:
+                print(f"[调试] 堆栈跟踪:")
+                print(traceback.format_exc())
+            return "", False
         
         full_content = ''
         buffer = ''
@@ -525,10 +699,17 @@ class ChatCompressClient:
             print(f"调试模式已启用，输出将保存到: {log_file}")
         
         try:
+            stream_start = time.time()
+            chunk_count = 0
+            
             while True:
                 chunk = response.read(1024)
                 if not chunk:
                     break
+                
+                chunk_count += 1
+                if debug and chunk_count <= 3:
+                    print(f"[调试] 收到第{chunk_count}个数据块，大小: {len(chunk)} 字节")
                 
                 buffer += chunk.decode('utf-8', errors='ignore')
                 
@@ -539,8 +720,17 @@ class ChatCompressClient:
                     if line.startswith('data: '):
                         json_str = line[6:].strip()
                         if json_str == '[DONE]':
+                            stream_end = time.time()
+                            if debug:
+                                print(f"\n[调试] 流式响应结束")
+                                print(f"[调试] 总共收到 {chunk_count} 个数据块")
+                                print(f"[调试] 流式读取耗时: {stream_end - stream_start:.2f}秒")
+                                print(f"[调试] 当前累计内容长度: {len(full_content)} 字符")
+                            
                             # 流式响应结束，检查并执行待处理的工具调用
                             if pending_tool_calls:
+                                if debug:
+                                    print(f"[调试] 检测到 {len(pending_tool_calls)} 个待执行的工具调用")
                                 for tool_call_data in pending_tool_calls:
                                     response_content = self._execute_pending_tool_call(
                                         tool_call_data, 
@@ -551,12 +741,13 @@ class ChatCompressClient:
                                     )
                                     if response_content:
                                         tool_call_response = response_content
-                                # 有工具调用，返回工具执行后的响应
-                                return tool_call_response if tool_call_response else full_content, True
+                                # 工具调用已执行完毕，返回最终响应，标记为无更多工具调用
+                                return tool_call_response if tool_call_response else full_content, False
                             else:
                                 # 没有工具调用，正常结束
+                                if debug:
+                                    print(f"[调试] 没有工具调用，返回正常响应")
                                 return full_content, False
-                            continue
                         
                         try:
                             chunk_data = json.loads(json_str)
@@ -566,6 +757,8 @@ class ChatCompressClient:
                                 
                                 # 检测工具调用请求
                                 if 'tool_calls' in delta:
+                                    if debug:
+                                        print(f"[调试] 检测到工具调用片段")
                                     for tc in delta['tool_calls']:
                                         index = tc.get('index', 0)
                                         
@@ -587,6 +780,8 @@ class ChatCompressClient:
                                         if 'function' in tc:
                                             if 'name' in tc['function']:
                                                 tool_calls_buffer[index]['function']['name'] = tc['function']['name']
+                                                if debug:
+                                                    print(f"[调试] 工具名称: {tc['function']['name']}")
                                             if 'arguments' in tc['function']:
                                                 # 累积arguments片段
                                                 tool_calls_buffer[index]['function']['arguments'] += tc['function']['arguments']
@@ -600,6 +795,8 @@ class ChatCompressClient:
                                                 
                                                 # 如果成功解析，说明参数完整，加入待执行队列
                                                 if tool_name:
+                                                    if debug:
+                                                        print(f"[调试] 工具参数解析成功，加入待执行队列")
                                                     pending_tool_calls.append({
                                                         'id': tool_calls_buffer[index]['id'],
                                                         'name': tool_name,
@@ -619,6 +816,9 @@ class ChatCompressClient:
                                         with open(log_file, 'a', encoding='utf-8') as f:
                                             f.write(content)
                         except json.JSONDecodeError as e:
+                            if debug:
+                                print(f"[调试] JSON解析失败: {e}")
+                                print(f"[调试] 失败的JSON字符串: {json_str[:200]}")
                             pass
                 
                 # 保留未处理的部分
@@ -629,11 +829,22 @@ class ChatCompressClient:
         except KeyboardInterrupt:
             print('\n\n用户中断')
             return full_content, False
+        except Exception as e:
+            import traceback
+            print(f"\n[错误] 读取流式响应时发生异常!")
+            print(f"[错误] 异常类型: {type(e).__name__}")
+            print(f"[错误] 异常信息: {e}")
+            if debug:
+                print(f"[调试] 堆栈跟踪:")
+                print(traceback.format_exc())
+            return full_content, False
         finally:
             conn.close()
         
-        # 流结束后的兜底检查
-        if pending_tool_calls:
+        # 流结束后的兜底检查（防止异常情况下pending_tool_calls未被处理）
+        if pending_tool_calls and not tool_call_response:
+            if debug:
+                print(f"[调试] 流结束后检测到 {len(pending_tool_calls)} 个待执行的工具调用（兜底执行）")
             for tool_call_data in pending_tool_calls:
                 response_content = self._execute_pending_tool_call(
                     tool_call_data, 
@@ -644,8 +855,11 @@ class ChatCompressClient:
                 )
                 if response_content:
                     tool_call_response = response_content
-            return tool_call_response if tool_call_response else full_content, True
+            # 工具调用已执行完毕，返回最终响应，标记为无更多工具调用
+            return tool_call_response if tool_call_response else full_content, False
         
+        if debug:
+            print(f"[调试] 流式请求完成，返回内容长度: {len(full_content)}")
         return full_content, False
     
     def _execute_pending_tool_call(self, tool_call_data, data, conn, headers, prompt):
@@ -693,11 +907,31 @@ class ChatCompressClient:
             conn = http.client.HTTPConnection(self.host)
         
         # 重新构建请求时禁用工具调用
-        data['messages'] = [
-            {'role': 'system', 'content': '你是一个友好的AI助手，具有文件操作能力。当用户需要进行文件操作时，请使用工具调用格式。'},
-            *self.chat_history,
-            {'role': 'user', 'content': prompt}
+        cleaned_history = self._clean_message_sequence(self.chat_history)
+        
+        messages_list = [
+            {'role': 'system', 'content': '''你是一个友好的AI助手，具有以下能力：
+1. 文件操作：列出目录、读写文件、重命名、删除
+2. 网页访问：使用 curl 工具访问网页
+3. 知识库查询：当用户提到"文档仓库"、"文件仓库"、"知识库"、"查找文档"时，使用 anythingllm_query 工具查询本地文档
+
+重要提示：
+- 如果用户询问关于公司内部文档、政策、项目资料等问题，优先使用 anythingllm_query 工具
+- 如果用户询问通用知识，直接回答即可
+- 工具调用失败时，尝试其他方法或告知用户
+- 从知识库返回结果时，只展示与问题直接相关的内容，过滤掉明显不相关的文档'''}
         ]
+        
+        # 检查最后一条消息是否已经是当前用户的prompt，避免重复
+        if cleaned_history and cleaned_history[-1].get('role') == 'user' and cleaned_history[-1].get('content') == prompt:
+            # 最后一条已经是当前用户消息，不需要再添加
+            messages_list.extend(cleaned_history)
+        else:
+            # 需要添加当前用户消息
+            messages_list.extend(cleaned_history)
+            messages_list.append({'role': 'user', 'content': prompt})
+        
+        data['messages'] = messages_list
         # 禁用工具调用，因为已经执行过了
         data['tool_choice'] = 'none'
         
@@ -771,6 +1005,322 @@ class ChatCompressClient:
         print(f"  压缩阈值: {self.max_rounds} 轮 或 {self.max_context_tokens} tokens")
         print()
     
+    def _show_compress_settings(self):
+        """显示压缩相关设置"""
+        print("\n[压缩设置]")
+        print(f"  自动压缩: {'✅ 启用' if self.auto_compress_enabled else '❌ 禁用'}")
+        print(f"  下次跳过: {'是' if self.skip_next_compress else '否'}")
+        print(f"  轮数阈值: {self.max_rounds} 轮")
+        print(f"\n[可用命令]")
+        print(f"  skip_compress / 跳过压缩  - 跳过下次自动压缩")
+        print(f"  enable_compress / 启用压缩 - 启用自动压缩")
+        print(f"  disable_compress / 禁用压缩 - 禁用自动压缩")
+        print(f"  compress_settings / 压缩设置 - 显示此信息")
+        print()
+    
+    def _check_and_extract_key_info(self):
+        """检查是否需要提取关键信息，并在满足条件时执行"""
+        
+        # 检查是否全局禁用
+        if not self.auto_extract_enabled:
+            return
+        
+        # 检查是否单次跳过
+        if self.skip_next_extract:
+            self.skip_next_extract = False
+            print("[关键信息提取] 用户跳过本次提取")
+            return
+        
+        # 计算当前对话轮数
+        rounds = len(self.chat_history) // 2
+        
+        # 每 extract_interval 轮对话触发一次
+        if rounds > 0 and rounds % self.extract_interval == 0:
+            print(f"\n[关键信息提取] 检测到第{rounds}轮对话，开始提取关键信息...")
+            self._extract_5w_info()
+    
+    def _extract_5w_info(self):
+        """执行 5W 关键信息提取"""
+        
+        # 获取最近的对话历史（最近 extract_interval * 2 条消息）
+        recent_messages = self.chat_history[-(self.extract_interval * 2):]
+        
+        # 构建提取提示词
+        extract_prompt = self._build_extract_prompt(recent_messages)
+        
+        # 调用 LLM 进行提取
+        print("[关键信息提取] 正在调用 LLM...")
+        response_data = self._send_extract_request(
+            extract_prompt, 
+            max_tokens=512,  # 5W 结果不需要太多 token
+            temperature=0.3
+        )
+        
+        # 解析响应
+        extracted_info = self._parse_extraction_response(response_data)
+        
+        if extracted_info:
+            print("[关键信息提取] 提取成功:")
+            print(extracted_info)
+            
+            # 保存到文件
+            success = self._save_to_log_file(extracted_info, len(self.chat_history) // 2)
+            
+            if success:
+                print("[关键信息提取] ✅ 完成")
+            else:
+                print("[关键信息提取] ⚠️ 保存失败")
+        else:
+            print("[关键信息提取] ❌ 提取失败")
+    
+    def _build_extract_prompt(self, recent_messages):
+        """构建 5W 信息提取的提示词"""
+        
+        # 格式化对话历史
+        conversation_text = ""
+        for i, msg in enumerate(recent_messages, 1):
+            role = "用户" if msg['role'] == 'user' else "AI助手"
+            content = msg.get('content', '')
+            if isinstance(content, list):
+                content = str(content)
+            conversation_text += f"{i}. {role}: {content}\n"
+        
+        prompt = f"""请分析以下对话内容，按照 5W 规则提取关键信息。
+
+【对话内容】（共{len(recent_messages)}条消息）
+{conversation_text}
+
+【提取要求】
+请严格按照以下格式输出，每个字段一行：
+- Who: [参与者姓名或角色，如果没有明确提及则写“未提及”]
+- What: [发生的主要事件或讨论的核心话题，用一句话概括]
+- When: [具体时间或时间段，如果没有则写“未提及”]
+- Where: [地点或场所，如果没有则写“未提及”]
+- Why: [原因、目的或动机，如果没有则写“未提及”]
+
+【重要注意事项】
+1. 必须分析所有对话内容，不能遗漏任何一条消息
+2. 只提取对话中明确提到的信息，不要推测
+3. 保持简洁，每个字段不超过 30 字
+4. 如果某个信息在对话中出现多次，提取最重要的那个
+5. 使用中文输出
+6. 直接输出 5W 结果，不要输出任何思考过程、分析步骤或额外说明
+7. 不要在输出中包含 "Thinking Process"、"分析"、"首先"、"Let" 等字样
+8. 输出格式必须完全按照下面的示例，不要添加任何 Markdown 格式
+
+【输出示例】
+- Who: 张三
+- What: 用户进行自我介绍
+- When: 未提及
+- Where: 北京
+- Why: 寻求助手协助
+
+【开始提取】"""
+
+        return prompt
+    
+    def _send_extract_request(self, prompt, max_tokens=256, temperature=0.3):
+        """发送提取请求到 LLM"""
+        try:
+            if self.base_url.startswith('https://'):
+                conn = http.client.HTTPSConnection(self.host)
+            else:
+                conn = http.client.HTTPConnection(self.host)
+            
+            headers = {
+                'Content-Type': 'application/json'
+            }
+            if self.token:
+                headers['Authorization'] = f'Bearer {self.token}'
+            
+            data = {
+                'model': self.model,
+                'messages': [
+                    {'role': 'system', 'content': '你是一个专业的信息提取助手。'},
+                    {'role': 'user', 'content': prompt}
+                ],
+                'max_tokens': max_tokens,
+                'temperature': temperature,
+                'stream': False
+            }
+            
+            conn.request('POST', f'{self.path}/chat/completions', json.dumps(data), headers)
+            response = conn.getresponse()
+            response_data = json.loads(response.read().decode())
+            conn.close()
+            
+            return response_data
+            
+        except Exception as e:
+            print(f"[提取请求错误] {str(e)}")
+            return None
+    
+    def _parse_extraction_response(self, response_data):
+        """解析 LLM 返回的提取结果"""
+        
+        if response_data is None:
+            return None
+        
+        if 'choices' not in response_data or len(response_data['choices']) == 0:
+            return None
+        
+        choice = response_data['choices'][0]
+        message = choice.get('message', {})
+        
+        # 优先使用 content 字段（最终结果），而不是 reasoning_content（思考过程）
+        content = message.get('content', '').strip()
+        
+        # 如果 content 为空，才尝试从 reasoning_content 提取
+        if not content:
+            print("[解析] content 为空，尝试从 reasoning_content 提取...")
+            reasoning_content = message.get('reasoning_content', '')
+            
+            if reasoning_content:
+                # 从 reasoning_content 中提取最后的 5W 结果
+                # 方法1：查找 "- Who:" 开始的位置
+                who_match = re.search(r'-\s*Who:', reasoning_content)
+                if who_match:
+                    content = reasoning_content[who_match.start():].strip()
+                    print(f"[解析] 从 reasoning_content 提取到 5W 结果")
+                
+                # 方法2：如果没有找到，提取最后几行
+                if not content:
+                    lines = reasoning_content.strip().split('\n')
+                    # 取最后 5 行（假设是 5W 结果）
+                    content = '\n'.join(lines[-5:]).strip()
+                    print(f"[解析] 从 reasoning_content 最后 5 行提取")
+        
+        if not content:
+            delta = choice.get('delta', {})
+            content = delta.get('content', '').strip()
+        
+        if not content:
+            print("[解析错误] 无法从响应中提取内容")
+            return None
+        
+        # 验证是否包含 5W 关键字段
+        required_keywords = ['Who', 'What']
+        has_required = any(keyword in content for keyword in required_keywords)
+        
+        if has_required:
+            print(f"[解析成功] 提取到 {len(content)} 字符的 5W 结果")
+            return content
+        else:
+            print("[解析警告] 返回内容不符合 5W 格式")
+            print(f"[调试] 返回内容前200字符: {content[:200]}")
+            return None
+    
+    def _save_to_log_file(self, extracted_info, round_number):
+        """将提取的信息保存到日志文件（增量更新）"""
+        
+        log_dir = os.path.dirname(self.log_file_path)
+        
+        try:
+            # 检查是否包含5W关键字段（支持两种格式：- Who: 和 Who:）
+            if not re.search(r'(?:^|\n)\s*(?:-\s*)?(Who|What|When|Where|Why):', extracted_info, re.MULTILINE):
+                print("[日志警告] 提取内容不包含5W信息，跳过保存")
+                return False
+            
+            # 如果目录不存在，创建目录
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+                print(f"[日志保存] 创建目录: {log_dir}")
+            
+            # 获取当前时间戳
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            
+            # 清理内容（移除 Thinking Process）
+            clean_content = self._clean_extraction_content(extracted_info)
+            
+            # 格式化日志条目
+            log_entry = f"\n{'='*60}\n"
+            log_entry += f"【记录时间】{timestamp}\n"
+            log_entry += f"【对话轮次】第 {round_number} 轮\n"
+            log_entry += f"{'='*60}\n"
+            log_entry += clean_content
+            log_entry += f"\n{'='*60}\n"
+            
+            # 追加写入文件
+            with open(self.log_file_path, 'a', encoding='utf-8') as f:
+                f.write(log_entry)
+            
+            print(f"[日志保存] 成功保存到: {self.log_file_path}")
+            return True
+            
+        except Exception as e:
+            print(f"[日志保存] 错误: {str(e)}")
+            return False
+    
+    def _clean_extraction_content(self, content):
+        """清理提取内容，移除冗余思考过程，保留对话上下文和5W结果"""
+        if not content:
+            return content
+        
+        # 查找 "Analyze the Dialogue Content" 或 "Analyze the Dialogue" 的位置
+        # 支持格式：2. **Analyze the Dialogue:** 或 2. **Analyze the Dialogue Content:**
+        dialogue_match = re.search(r'\d+\.\s*\*{0,2}Analyze the Dialogue(?: Content)?\*{0,2}:', content)
+        
+        # 查找标准格式的 5W 结果（在行首，带 - 前缀或不带）
+        # 排除 **Who:** 这种 Markdown 格式
+        five_w_match = re.search(r'(?:^|\n)\s*-\s*(Who|What|When|Where|Why):', content, re.MULTILINE)
+        
+        # 如果没有找到带 - 的格式，尝试找不带 - 的格式（但要确保是在行首）
+        if not five_w_match:
+            five_w_match = re.search(r'(?:^|\n)(Who|What|When|Where|Why):', content, re.MULTILINE)
+        
+        if dialogue_match and five_w_match:
+            # 两者都存在，保留从对话分析开始到结尾的所有内容
+            start_pos = dialogue_match.start()
+            clean_content = content[start_pos:].strip()
+            return clean_content
+        elif five_w_match:
+            # 只有5W结果，保留5W部分
+            start_pos = five_w_match.start()
+            clean_content = content[start_pos:].strip()
+            return clean_content
+        elif dialogue_match:
+            # 只有对话分析，保留对话分析部分
+            start_pos = dialogue_match.start()
+            clean_content = content[start_pos:].strip()
+            return clean_content
+        
+        # 如果都没有匹配，尝试移除常见的思考过程标记
+        thinking_markers = [
+            'Thinking Process:',
+            '思考过程',
+            '分析过程',
+            'Let me think',
+            'First,',
+            'Second,',
+            'Finally,'
+        ]
+        
+        for marker in thinking_markers:
+            if marker in content:
+                parts = content.split(marker, 1)
+                if len(parts) > 1:
+                    remaining = parts[1].strip()
+                    # 检查剩余内容是否包含有用信息
+                    if remaining and len(remaining) > 50:
+                        return remaining.strip()
+        
+        # 如果都没有匹配，返回原始内容
+        return content
+    
+    def _show_extract_settings(self):
+        """显示关键信息提取相关设置"""
+        print("\n[关键信息提取设置]")
+        print(f"  自动提取: {'✅ 启用' if self.auto_extract_enabled else '❌ 禁用'}")
+        print(f"  下次跳过: {'是' if self.skip_next_extract else '否'}")
+        print(f"  提取频率: 每 {self.extract_interval} 轮对话")
+        print(f"  日志路径: {self.log_file_path}")
+        print(f"\n[可用命令]")
+        print(f"  skip_extract / 跳过提取   - 跳过下次提取")
+        print(f"  enable_extract / 启用提取  - 启用自动提取")
+        print(f"  disable_extract / 禁用提取 - 禁用自动提取")
+        print(f"  extract_settings / 提取设置 - 显示此信息")
+        print()
+    
     def run(self):
         """运行交互式聊天界面"""
         print("=" * 60)
@@ -789,7 +1339,15 @@ class ChatCompressClient:
         print("  exit/quit - 退出程序")
         print("  clear     - 清空聊天历史")
         print("  debug     - 切换调试模式")
+        print("  log       - 切换详细日志模式")
         print("  stats     - 显示聊天统计信息")
+        print("  skip_compress / 跳过压缩 - 跳过下次自动压缩")
+        print("  enable_compress / 启用压缩 - 启用自动压缩")
+        print("  disable_compress / 禁用压缩 - 禁用自动压缩")
+        print("  compress_settings / 压缩设置 - 显示压缩设置")
+        print("  skip_extract / 跳过提取   - 跳过下次关键信息提取")
+        print("  disable_extract / 禁用提取 - 禁用自动提取")
+        print("  extract_settings / 提取设置 - 查看提取设置")
         print("  按 Ctrl+C 随时退出")
         print("=" * 60)
         print()
@@ -817,18 +1375,122 @@ class ChatCompressClient:
                     print(f"调试模式{status}")
                     continue
                 
+                if user_input.lower() == 'log':
+                    self.debug_mode = not self.debug_mode
+                    status = "已启用" if self.debug_mode else "已禁用"
+                    print(f"📝 详细日志模式{status}")
+                    if self.debug_mode:
+                        print("   ✓ 将显示所有调试信息")
+                        print("   ✓ 包括 API 请求/响应、工具调用详情")
+                    else:
+                        print("   ✓ 仅显示关键信息")
+                        print("   ✓ 界面更简洁")
+                    continue
+                
                 if user_input.lower() == 'stats':
                     self.show_history_stats()
                     continue
                 
+                # 处理压缩控制命令
+                if user_input.lower() in ['skip_compress', '跳过压缩']:
+                    self.skip_next_compress = True
+                    print("[设置] 下次将跳过自动压缩")
+                    continue
+                
+                if user_input.lower() in ['enable_compress', '启用压缩']:
+                    self.auto_compress_enabled = True
+                    self.skip_next_compress = False
+                    print("[设置] 已启用自动压缩")
+                    continue
+                
+                if user_input.lower() in ['disable_compress', '禁用压缩']:
+                    self.auto_compress_enabled = False
+                    print("[设置] 已禁用自动压缩")
+                    continue
+                
+                if user_input.lower() in ['compress_settings', '压缩设置']:
+                    self._show_compress_settings()
+                    continue
+                
+                # 处理关键信息提取控制命令
+                if user_input.lower() in ['skip_extract', '跳过提取']:
+                    self.skip_next_extract = True
+                    print("[设置] 下次将跳过关键信息提取")
+                    continue
+                
+                if user_input.lower() in ['enable_extract', '启用提取']:
+                    self.auto_extract_enabled = True
+                    self.skip_next_extract = False
+                    print("[设置] 已启用自动提取")
+                    continue
+                
+                if user_input.lower() in ['disable_extract', '禁用提取']:
+                    self.auto_extract_enabled = False
+                    print("[设置] 已禁用自动提取")
+                    continue
+                
+                if user_input.lower() in ['extract_settings', '提取设置']:
+                    self._show_extract_settings()
+                    continue
+                
+                # ========== 处理 /search 命令 ==========
+                if user_input.startswith('/search'):
+                    # 提取搜索关键词
+                    query = user_input[7:].strip()  # 去掉 '/search' 前缀
+                    if not query:
+                        query = "查找聊天历史"  # 默认查询
+                    
+                    print(f"\n{'='*60}")
+                    print(f"[搜索命令] 搜索关键词: {query}")
+                    print(f"{'='*60}")
+                    
+                    # 直接调用工具
+                    result = tools.search_chat_history(query, debug=self.debug_mode)
+                    
+                    # 显示结果
+                    if result.get('success'):
+                        print(f"\n[搜索结果] {result.get('message')}")
+                        if result.get('content'):
+                            content = result.get('content')
+                            # 清理内容（移除 Thinking Process）
+                            clean_content = self._clean_extraction_content(content)
+                            print(clean_content)
+                        print(f"\n{'='*60}")
+                    else:
+                        print(f"\n[搜索失败] {result.get('message', result.get('error'))}")
+                        if result.get('suggestion'):
+                            print(f"[建议] {result.get('suggestion')}")
+                        print(f"\n{'='*60}")
+                    
+                    continue  # 不继续处理为普通对话
+                
                 self.add_to_history('user', user_input)
                 
-                print("AI: ", end='', flush=True)
+                print("\nAI: ", end='', flush=True)
+                if debug_mode:
+                    print(f"\n[调试] 准备调用 send_request_stream...")
+                    print(f"[调试] 用户输入长度: {len(user_input)} 字符")
+                    print(f"[调试] 当前聊天历史条数: {len(self.chat_history)}")
+                
                 response, time_taken = self.send_request_stream(user_input, debug=debug_mode)
                 
+                if debug_mode:
+                    print(f"\n[调试] send_request_stream 返回")
+                    print(f"[调试] response 类型: {type(response)}")
+                    print(f"[调试] response 值: '{response}'")
+                    print(f"[调试] response 长度: {len(response) if response else 0}")
+                    print(f"[调试] time_taken: {time_taken}")
+                
+                # 注意：response 已经在 _send_single_stream 中流式输出了，这里不需要再打印
+                # 只需要添加一个换行符即可
+                if response:
+                    print()  # 添加换行，与流式输出的内容分隔
                 if response:
                     self.add_to_history('assistant', response)
                     print(f"[耗时: {time_taken:.2f}秒]")
+                    
+                    # 检查是否需要提取关键信息
+                    self._check_and_extract_key_info()
                 else:
                     print("\n抱歉，模型没有返回有效内容。")
                     self.chat_history.pop()
