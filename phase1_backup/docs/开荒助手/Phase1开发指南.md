@@ -9,6 +9,7 @@
 - ✅ 完整的单元测试套件 (106/106 通过)
 - ✅ 核心数据结构实现（哈希表 + 双向链表）
 - ✅ 集成 Local LLM 的 AI 健康顾问
+- ✅ 完善的 CLI 交互与输入校验机制
 
 ---
 
@@ -261,16 +262,18 @@ class DoublyLinkedList:
 class PetProfile:
     """宠物档案类"""
     
-    def __init__(self, pet_id, name, breed, age, weight):
+    def __init__(self, pet_id, name, breed, age, weight, gender="unknown", species="dog"):
         """
         初始化宠物档案
         
         Args:
-            pet_id: 宠物唯一ID
+            pet_id: 宠物唯一 ID
             name: 宠物名字
             breed: 品种
             age: 年龄（岁）
             weight: 体重（公斤）
+            gender: 性别，"male" / "female" / "unknown"
+            species: 物种，"cat" / "dog" / "other"
         """
         self.pet_id = pet_id
         self.name = name
@@ -434,7 +437,7 @@ class SmartPetProfileSystem:
         """初始化系统"""
         self.profile_manager = PetProfileManager()
     
-    def register_pet(self, pet_id, name, breed, age, weight):
+    def register_pet(self, pet_id, name, breed, age, weight, gender="unknown", species="dog"):
         """
         注册新宠物
         
@@ -444,6 +447,8 @@ class SmartPetProfileSystem:
             breed: 品种
             age: 年龄
             weight: 体重
+            gender: 性别
+            species: 物种
             
         Returns:
             PetProfile对象
@@ -801,16 +806,23 @@ def main():
         
         elif choice == '1':
             # 注册新宠物
-            pet_id = input("请输入宠物ID: ").strip()
-            name = input("请输入宠物名字: ").strip()
+            name = input("请输入宠物姓名: ").strip()
+            print("请选择物种: 1.狗狗  2.猫咪  3.其他")
+            species_choice = input("请输入选项编号: ").strip()
+            species_map = {"1": "dog", "2": "cat", "3": "other"}
+            species = species_map.get(species_choice, "unknown")
             breed = input("请输入品种: ").strip()
-            age = float(input("请输入年龄（岁）: ").strip())
-            weight = float(input("请输入体重（公斤）: ").strip())
-            
+            gender_map = {"1": "male", "2": "female"}
+            gender_choice = input("请选择性别: 1.公  2.母: ").strip()
+            gender = gender_map.get(gender_choice, "unknown")
             try:
-                system.register_pet(pet_id, name, breed, age, weight)
+                age = float(input("请输入年龄(岁): "))
+                weight = float(input("请输入体重(kg): "))
+                pet_count = system.get_pet_count()
+                pet_id = f"pet_{pet_count + 1:03d}"
+                system.register_pet(pet_id, name, breed, age, weight, gender, species)
             except ValueError as e:
-                print(f"错误：{e}")
+                print(f"[ERR] 输入格式错误：{e}")
         
         elif choice == '2':
             # 查看所有宠物
@@ -911,6 +923,11 @@ if __name__ == "__main__":
 2. ✅ 集成AI健康顾问
 3. ✅ 完成主程序
 4. ✅ 端到端测试
+
+### **后续优化（已完成）**
+1. ✅ 修复 `main.py` 注册流程中的性别录入缺失问题。
+2. ✅ 强化代码封装性，移除对底层数据结构的直接访问。
+3. ✅ 完善异常处理，确保系统在 LLM 服务不可用时仍能稳定运行。
 
 ---
 
