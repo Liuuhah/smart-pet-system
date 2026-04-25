@@ -566,8 +566,16 @@ class ChatCompressClient:
             print(traceback.format_exc())
             return None
     
-    def send_request_stream(self, prompt, max_tokens=4096, debug=None):
+    def send_request_stream(self, prompt, max_tokens=4096, debug=None, temperature=0.6):
         """发送流式请求，实时输出回复内容（带自动压缩功能）
+        
+        Args:
+            prompt: 用户输入的 prompt
+            max_tokens: 最大生成 token 数
+            debug: 是否启用调试模式
+            temperature: 温度值，控制生成的随机性（0.0-1.0）
+                       - 0.2-0.4: 更严谨、确定性高（适合专业问诊）
+                       - 0.7-0.9: 更灵动、创造性高（适合闲聊）
         
         注意：为了支持组合模式下的外部调用，此方法现在接收 prompt 字符串
         并内部处理历史记录的组装。
@@ -588,7 +596,7 @@ class ChatCompressClient:
                     print(f"\n[调试] 第{round_num + 1}轮工具调用...")
             
             content, has_tool_call = self._send_single_stream(
-                prompt, max_tokens, debug, round_num == 0
+                prompt, max_tokens, debug, round_num == 0, temperature
             )
             
             if content:
@@ -604,8 +612,12 @@ class ChatCompressClient:
         
         return full_content, total_time
     
-    def _send_single_stream(self, prompt, max_tokens, debug, is_first_round):
-        """发送单次流式请求，返回(内容, 是否有工具调用)"""
+    def _send_single_stream(self, prompt, max_tokens, debug, is_first_round, temperature=0.6):
+        """发送单次流式请求，返回(内容, 是否有工具调用)
+        
+        Args:
+            temperature: 温度值，控制生成的随机性
+        """
         if debug:
             print(f"\n{'='*60}")
             print(f"[调试] 开始发送流式请求")
@@ -653,7 +665,7 @@ class ChatCompressClient:
             'tools': self.tools,
             'tool_choice': 'auto',
             'max_tokens': max_tokens,
-            'temperature': 0.6,
+            'temperature': temperature,  # 使用动态传入的 temperature
             'stream': True
         }
         

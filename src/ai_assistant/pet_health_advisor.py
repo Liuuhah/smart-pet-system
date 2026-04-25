@@ -134,6 +134,30 @@ class PetHealthAdvisor:
         self.client.clear_history()
         logger.info("已重置 AI 管家上下文")
     
+    def _detect_intent(self, user_input: str) -> str:
+        """
+        简单的关键词意图识别。
+        返回 'chat' (闲聊) 或 'consult' (问诊)。
+        
+        Args:
+            user_input: 用户输入文本
+        
+        Returns:
+            str: 'chat' 或 'consult'
+        """
+        # 医疗关键词列表
+        medical_keywords = [
+            "病", "痛", "吐", "拉", "吃", "喝", "药", "医", "诊", "症状",
+            "发烧", "咳嗽", "瘦", "胖", "呕吐", "腹泻", "精神", "异常",
+            "不吃", "不喝", "拉肚子", "感冒", "受伤", "流血", "抽搐"
+        ]
+        
+        # 如果包含任何医疗关键词，则进入专业模式
+        if any(kw in user_input for kw in medical_keywords):
+            return "consult"
+        
+        return "chat"
+    
     # ==================== 核心业务方法 ====================
     
     def analyze_feeding_plan(self, pet_profile_dict: Dict[str, Any]) -> str:
@@ -305,6 +329,67 @@ class PetHealthAdvisor:
         except Exception as e:
             logger.error(f"健康报告生成失败: {e}")
             return f"抱歉，暂时无法生成健康报告。错误信息：{str(e)}"
+    
+    def consult(self, user_input: str) -> str:
+        """
+        统一的咨询接口，支持双模态交互（闲聊模式 / 专业问诊模式）
+        
+        架构设计说明：
+        - 意图识别：根据用户输入自动判断是闲聊还是问诊
+        - 动态 Prompt：根据意图调整 System Prompt 后缀
+        - Temperature 调优：闲聊用高温度（0.8），问诊用低温度（0.4）
+        
+        Args:
+            user_input: 用户输入的文本
+        
+        Returns:
+            str: AI 的回复
+        """
+        # 1. 意图识别
+        intent = self._detect_intent(user_input)
+        
+        if intent == "chat":
+            # 闲聊模式：注入轻松的指令
+            context_instruction = "\n\n【当前状态：闲聊模式】\n用户只是在打招呼或闲聊。请保持轻松、随和的语气，像朋友一样简短回应，不要输出任何医疗建议格式。可以适当使用表情符号让对话更亲切。"
+            temperature = 0.8
+            logger.info("进入闲聊模式")
+        else:
+            # 专业模式：注入严谨的指令
+            context_instruction = "\n\n【当前状态：专业问诊模式】\n用户提到了健康问题。请严格按照兽医标准，提供结构化诊断、护理建议和紧急程度评估。语气要专业且温和。"
+            temperature = 0.4
+            logger.info("进入专业问诊模式")
+        
+        # 2. 更新 System Prompt（追加动态指令）
+        original_system_prompt = self.client.system_prompt
+        self.client.system_prompt = original_system_prompt + context_instruction
+        
+        # 3. 调用 LLM
+        try:
+            response, time_taken = self.client.send_request_stream(
+                user_input,
+                max_tokens=1024,
+                temperature=temperature
+            )
+            
+            if not response:
+                raise RuntimeError("LLM 未返回有效内容")
+            
+            # 记录到历史对话中
+            self.client.add_to_history('user', user_input)
+            self.client.add_to_history('assistant', response)
+            
+            logger.info(f"咨询完成（{intent}模式），耗时 {time_taken:.2f} 秒")
+            
+            # 恢复原始 System Prompt（避免影响后续对话）
+            self.client.system_prompt = original_system_prompt
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"咨询失败: {e}")
+            # 恢复原始 System Prompt
+            self.client.system_prompt = original_system_prompt
+            return f"抱歉，我暂时无法回应。错误信息：{str(e)}"
     
     # ==================== Prompt 工程方法（服务化封装）====================
     

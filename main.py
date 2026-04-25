@@ -207,15 +207,11 @@ def ai_consult_flow(system, advisor):
                 print(result)
                 continue
             
-            # 3. 正常对话
+            # 3. 正常对话（使用双模态咨询接口）
             print("\n🤖 AI 管家思考中...")
             
-            # 根据问题类型自动选择分析策略
-            if any(keyword in user_input for keyword in ["吃", "喂", "粮", "饭"]):
-                response = advisor.analyze_feeding_plan(pet_data)
-            else:
-                # 默认使用症状诊断或综合建议
-                response = advisor.diagnose_symptoms(pet_data, user_input)
+            # 调用统一的咨询接口，自动识别意图并切换模式
+            response = advisor.consult(user_input)
             
             print(f"\n[AI 管家]: {response}")
             
