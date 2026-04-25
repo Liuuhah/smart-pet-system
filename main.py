@@ -214,7 +214,7 @@ def main():
                 summary = advisor.get_medical_summary(force=True)
                 if summary:
                     print(f"\n--- 对话摘要 ---\n{summary}\n----------------")
-                    print("[OK] 已成功提取本次问诊精华，并保存至 logs/medical_records/ 目录。您可以随时查阅宠物的健康档案。")
+                    print("[OK] 已成功提取本次问诊精华，并保存至 D:\\chat-log 目录。您可以随时查阅宠物的健康档案。")
                 else:
                     print("暂无可提取的对话摘要（建议至少进行一轮有效问诊）。")
             except Exception as e:

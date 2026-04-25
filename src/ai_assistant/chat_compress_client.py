@@ -1038,11 +1038,103 @@ class ChatCompressClient:
         print()
     
     def extract_summary_now(self):
-        """强制立即提取当前对话摘要（跳过计数器限制）"""
+        """强制立即提取当前对话摘要（跳过计数器限制）
+        
+        设计原则：
+        - 手动触发优先级最高：无论对话长短都尝试提取
+        - 兜底归档策略：即使 LLM 判定信息不足，也保存原始对话
+        - 统一反馈：确保用户永远看到正向反馈
+        """
         print("\n[强制提取] 正在调用 LLM 进行 5W 信息提取...")
-        self._extract_5w_info()
-        # 返回最近一次保存的摘要内容（这里简化处理，实际可以从日志读取或返回 _extract_5w_info 的结果）
-        return "已尝试提取并保存至日志文件。"
+        
+        # 检查是否有对话历史
+        if len(self.chat_history) < 2:
+            # 无对话历史，直接保存提示
+            self._save_short_consultation_record(
+                reason="暂无对话记录",
+                recent_messages=[]
+            )
+            return "已成功保存问诊记录至日志文件（当前无对话内容）。"
+        
+        # 获取最近的对话消息（最多取最近 10 条）
+        recent_messages = self.chat_history[-10:]
+        
+        # 构建提取提示词（非累积模式）
+        extract_prompt = self._build_extract_prompt(recent_messages, is_cumulative=False)
+        
+        # 调用 LLM 进行提取
+        print("[强制提取] 正在调用 LLM...")
+        response_data = self._send_extract_request(
+            extract_prompt,
+            max_tokens=4096,
+            temperature=0.5
+        )
+        
+        # 解析响应
+        extracted_info, status, reason = self._parse_extraction_response(response_data)
+        
+        # 根据结果处理
+        if status == "success":
+            # 提取成功，保存到日志
+            round_number = len(self.chat_history) // 2
+            should_compress = self._should_compress()
+            success = self._save_to_log_file(
+                extracted_info=extracted_info,
+                round_number=round_number,
+                recent_messages=recent_messages,
+                is_cumulative=False,
+                counter_value=self.extract_message_counter,
+                should_compress=should_compress
+            )
+            
+            if success:
+                print("[强制提取] ✅ 提取成功并已保存")
+                return "已成功提取本次问诊精华，并保存至 D:\\chat-log 目录。您可以随时查阅宠物的健康档案。"
+            else:
+                print("[强制提取] ⚠️ 保存失败")
+                return "提取成功但保存失败，请稍后重试。"
+        
+        elif status == "insufficient_info":
+            # 信息不足，使用兜底策略：保存原始对话作为"简短问诊记录"
+            print(f"[强制提取] ⚠️ LLM 判定信息不足：{reason}")
+            print("[强制提取] 📝 启用兜底策略：保存原始对话记录")
+            
+            round_number = len(self.chat_history) // 2
+            self._save_short_consultation_record(
+                reason=reason,
+                recent_messages=recent_messages,
+                round_number=round_number
+            )
+            
+            return "已成功保存本次问诊记录至 D:\\chat-log 目录（简短问诊记录）。您可以随时查阅宠物的健康档案。"
+        
+        elif status == "technical_error":
+            # 技术故障，保存原始对话
+            print(f"[强制提取] ❌ 技术故障：{reason}")
+            print("[强制提取] 📝 启用兜底策略：保存原始对话记录")
+            
+            round_number = len(self.chat_history) // 2
+            self._save_short_consultation_record(
+                reason=f"技术故障：{reason}",
+                recent_messages=recent_messages,
+                round_number=round_number
+            )
+            
+            return "已成功保存本次问诊记录至 D:\\chat-log 目录（原始对话备份）。您可以随时查阅宠物的健康档案。"
+        
+        else:
+            # 其他错误，同样保存原始对话
+            print(f"[强制提取] ❌ 提取失败：{reason}")
+            print("[强制提取] 📝 启用兜底策略：保存原始对话记录")
+            
+            round_number = len(self.chat_history) // 2
+            self._save_short_consultation_record(
+                reason=reason,
+                recent_messages=recent_messages,
+                round_number=round_number
+            )
+            
+            return "已成功保存本次问诊记录至 D:\\chat-log 目录（原始对话备份）。您可以随时查阅宠物的健康档案。"
 
     def _check_and_extract_key_info(self):
         """检查是否需要提取关键信息，并在满足条件时执行"""
@@ -1556,6 +1648,77 @@ class ChatCompressClient:
             
         except Exception as e:
             print(f"[关键信息提取] ⚠️ 保存失败记录时出错: {str(e)}")
+    
+    def _save_short_consultation_record(self, reason, recent_messages, round_number=None):
+        """兜底归档策略：保存简短问诊记录（即使 LLM 判定信息不足）
+        
+        设计原则：
+        - 手动触发优先级最高：确保用户永远看到正向反馈
+        - 原始对话备份：即使无法提取 5W，也保存完整对话供后续查阅
+        - 标记为“简短问诊记录”：区分于正式的 5W 提取结果
+        
+        Args:
+            reason: 保存原因（如“信息不足”、“技术故障”等）
+            recent_messages: 最近的对话消息列表
+            round_number: 对话轮次（可选，自动计算）
+        """
+        try:
+            # 如果未提供轮次，自动计算
+            if round_number is None:
+                round_number = len(self.chat_history) // 2
+            
+            # 获取当前时间戳
+            from datetime import datetime
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            # 开始构建日志内容
+            log_content = "\n" + "=" * 60 + "\n"
+            log_content += f"【记录时间】{current_time}\n"
+            log_content += f"【对话轮次】第 {round_number} 轮\n"
+            log_content += f"【记录类型】📝 简短问诊记录（兜底归档）\n"
+            log_content += f"【保存原因】{reason}\n"
+            log_content += "=" * 60 + "\n\n"
+            
+            # 添加原始对话记录
+            if recent_messages:
+                log_content += f"💬 原始对话（共 {len(recent_messages)} 条消息）：\n\n"
+                for i, msg in enumerate(recent_messages, 1):
+                    role = msg.get('role', 'unknown')
+                    content = msg.get('content', '')
+                    
+                    # 对 assistant 的内容进行截断和总结
+                    if role == 'assistant':
+                        # 只保留前 100 个字符，后面加省略号
+                        if len(content) > 100:
+                            summary = content[:100].replace('\n', ' ').strip() + "..."
+                        else:
+                            summary = content.replace('\n', ' ').strip()
+                        log_content += f"[{i}] AI助手: {summary}\n\n"
+                    else:
+                        # user 的消息完整显示
+                        log_content += f"[{i}] 用户: {content}\n\n"
+            else:
+                log_content += "💬 无对话记录\n\n"
+            
+            # 添加说明
+            log_content += "📌 说明：\n"
+            log_content += "   本次问诊因信息量不足或技术原因未能提取标准 5W 信息，\n"
+            log_content += "   但系统已为您保存了完整的原始对话记录，方便您后续查阅。\n\n"
+            
+            # 添加保存位置
+            log_content += f"💾 保存位置：{self.log_file_path}\n"
+            log_content += "=" * 60 + "\n"
+            
+            # 写入文件
+            with open(self.log_file_path, 'a', encoding='utf-8') as f:
+                f.write(log_content)
+            
+            print(f"[兜底归档] ✅ 已成功保存简短问诊记录到: {self.log_file_path}")
+            return True
+            
+        except Exception as e:
+            print(f"[兜底归档] ❌ 保存失败: {e}")
+            return False
 
     def _generate_dialogue_summary(self, recent_messages):
         """生成对话摘要（用于失败记录）
