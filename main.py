@@ -129,7 +129,13 @@ def add_record_flow(system):
 
 
 def ai_consult_flow(system, advisor):
-    """[4] 咨询 AI 管家的交互流程"""
+    """[4] 咨询 AI 管家的交互流程（连续对话子模式）
+    
+    功能特性：
+    - 进入 while True 循环，支持多轮对话
+    - 特殊指令：/list 查看历史、/archive 精准提取摘要
+    - 退出时自动归档最后一段对话
+    """
     print("\n>>> 正在连接 AI 管家...")
     pet_name = input("请输入您要咨询的宠物姓名: ").strip()
     
@@ -143,37 +149,79 @@ def ai_consult_flow(system, advisor):
     target_pet = matches[0]
     print(f"\n已选中宠物：{target_pet}")
     
-    question = input(">>> 请输入您的问题: ").strip()
-    if not question:
-        print("[ERR] 问题不能为空！")
-        return
-
-    try:
-        # 准备发送给 AI 的数据字典（接口隔离原则）
-        pet_data = {
-            "name": target_pet.name,
-            "species": target_pet.species,
-            "breed": target_pet.breed,
-            "age": target_pet.age,
-            "weight": target_pet.weight,
-            "gender": target_pet.gender,
-            "recent_records": target_pet.health_timeline.traverse_backward(5)
-        }
-
-        print("\n🤖 AI 管家思考中...")
-        # 根据问题类型自动选择分析策略
-        if any(keyword in question for keyword in ["吃", "喂", "粮", "饭"]):
-            response = advisor.analyze_feeding_plan(pet_data)
-        else:
-            # 默认使用症状诊断或综合建议
-            response = advisor.diagnose_symptoms(pet_data, question)
-        
-        print(f"\n--- AI 回复 ---\n{response}\n----------------")
-        
-    except RuntimeError as e:
-        print(f"[WARN] AI 服务暂时不可用，请稍后重试。({e})")
-    except Exception as e:
-        print(f"[ERR] 咨询过程中发生未知错误：{e}")
+    # 准备发送给 AI 的数据字典（接口隔离原则）
+    pet_data = {
+        "name": target_pet.name,
+        "species": target_pet.species,
+        "breed": target_pet.breed,
+        "age": target_pet.age,
+        "weight": target_pet.weight,
+        "gender": target_pet.gender,
+        "recent_records": target_pet.health_timeline.traverse_backward(5)
+    }
+    
+    # 进入连续对话子模式
+    print("\n" + "=" * 60)
+    print("   AI 宠物健康管家 - 连续对话模式")
+    print("=" * 60)
+    print("   输入 'exit' 或 'quit' 退出")
+    print("   输入 '/list' 查看历史记录")
+    print("   输入 '/archive <轮次>' 精准提取摘要（如 /archive 1,3-5）")
+    print("=" * 60)
+    
+    while True:
+        try:
+            user_input = input("\n[你]: ").strip()
+            
+            if not user_input:
+                continue
+            
+            # 1. 退出检测
+            if user_input.lower() in ['exit', 'quit', '返回', 'q']:
+                print("\n[系统] 已结束本次咨询，正在为您保存记录...")
+                # 强制保存最后一段对话
+                summary = advisor.get_medical_summary(force=True)
+                if summary:
+                    print(f"\n--- 问诊记录 ---\n{summary}\n----------------")
+                print("[OK] 记录已保存，返回主菜单。")
+                break
+            
+            # 2. 特殊指令检测
+            if user_input.startswith('/list'):
+                history_display = advisor.get_history_display()
+                print(f"\n{history_display}")
+                continue
+            
+            if user_input.startswith('/archive'):
+                expression = user_input[len('/archive'):].strip()
+                if not expression:
+                    print("[系统] 请指定轮次，格式：/archive 1,3-5")
+                    continue
+                result = advisor.extract_summary_by_rounds(expression)
+                print(result)
+                continue
+            
+            # 3. 正常对话
+            print("\n🤖 AI 管家思考中...")
+            
+            # 根据问题类型自动选择分析策略
+            if any(keyword in user_input for keyword in ["吃", "喂", "粮", "饭"]):
+                response = advisor.analyze_feeding_plan(pet_data)
+            else:
+                # 默认使用症状诊断或综合建议
+                response = advisor.diagnose_symptoms(pet_data, user_input)
+            
+            print(f"\n[AI 管家]: {response}")
+            
+        except RuntimeError as e:
+            print(f"[WARN] AI 服务暂时不可用，请稍后重试。({e})")
+        except KeyboardInterrupt:
+            print("\n\n[系统] 检测到中断信号，正在保存记录...")
+            advisor.get_medical_summary(force=True)
+            print("[OK] 记录已保存，返回主菜单。")
+            break
+        except Exception as e:
+            print(f"[ERR] 咨询过程中发生未知错误：{e}")
 
 
 def main():

@@ -1163,17 +1163,28 @@ class ChatCompressClient:
         else:
             print(f"[调试] 不满足提取条件 (rounds={rounds}, rounds % {self.extract_interval} = {rounds % self.extract_interval})")
     
-    def _extract_5w_info(self):
-        """执行 5W 关键信息提取（支持累积模式）"""
+    def _extract_5w_info(self, messages=None):
+        """执行 5W 关键信息提取（支持累积模式和自定义消息列表）
         
-        # 简化为固定提取最近的 extract_interval * 2 条消息
-        recent_messages = self.chat_history[-(self.extract_interval * 2):]
-        is_cumulative = (self.extract_message_counter > self.extract_interval)
+        Args:
+            messages: 可选参数，传入自定义消息列表进行总结
+                     如果为 None，则使用 self.chat_history 的最近消息
+        """
         
-        if is_cumulative:
-            print(f"[关键信息提取] 🔄 累积模式：计数器={self.extract_message_counter}，提取最近 {len(recent_messages)} 条消息")
+        # 如果传入了自定义消息列表，直接使用；否则使用默认逻辑
+        if messages is not None:
+            recent_messages = messages
+            is_cumulative = False  # 自定义消息列表不使用累积模式
+            print(f"[关键信息提取] 🎯 精准提取模式：处理 {len(recent_messages)} 条指定消息")
         else:
-            print(f"[关键信息提取] 标准模式：计数器={self.extract_message_counter}，提取最近 {len(recent_messages)} 条消息")
+            # 默认逻辑：提取最近的 extract_interval * 2 条消息
+            recent_messages = self.chat_history[-(self.extract_interval * 2):]
+            is_cumulative = (self.extract_message_counter > self.extract_interval)
+            
+            if is_cumulative:
+                print(f"[关键信息提取] 🔄 累积模式：计数器={self.extract_message_counter}，提取最近 {len(recent_messages)} 条消息")
+            else:
+                print(f"[关键信息提取] 标准模式：计数器={self.extract_message_counter}，提取最近 {len(recent_messages)} 条消息")
         
         # 构建提取提示词（传入累积模式标志）
         extract_prompt = self._build_extract_prompt(recent_messages, is_cumulative)
