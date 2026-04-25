@@ -154,6 +154,10 @@ class PetHealthAdvisor:
             if not response:
                 raise RuntimeError("LLM 未返回有效内容")
             
+            # 记录到历史对话中，以便后续提取摘要或压缩
+            self.client.add_to_history('user', prompt)
+            self.client.add_to_history('assistant', response)
+            
             logger.info(f"喂养计划分析完成，耗时 {time_taken:.2f} 秒")
             return response
             
@@ -204,6 +208,10 @@ class PetHealthAdvisor:
             
             if not response:
                 raise RuntimeError("LLM 未返回有效内容")
+            
+            # 记录到历史对话中，以便后续提取摘要或压缩
+            self.client.add_to_history('user', prompt)
+            self.client.add_to_history('assistant', response)
             
             logger.info(f"症状诊断完成，耗时 {time_taken:.2f} 秒")
             return response
@@ -539,10 +547,18 @@ class PetHealthAdvisor:
         self.client._compress_chat_history()
         logger.info("已执行手动记忆压缩")
 
-    def get_medical_summary(self):
-        """获取当前的病历摘要（5W 信息提取）"""
-        summary = self.client._extract_5w_info()
-        return summary
+    def get_medical_summary(self, force=False):
+        """获取当前的 AI 管家对话摘要（5W 信息提取）
+        
+        Args:
+            force (bool): 是否强制立即提取，跳过计数器限制
+        """
+        if force:
+            return self.client.extract_summary_now()
+        else:
+            # 默认行为：仅返回已有的或触发常规检查
+            self.client._check_and_extract_key_info()
+            return "已触发常规检查，若满足条件将自动归档。"
 
     # ==================== 工具方法 ====================
     

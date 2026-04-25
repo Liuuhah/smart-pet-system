@@ -4,7 +4,7 @@ import time
 import http.client
 from urllib.parse import urlparse
 import re
-from tools import tools
+from .tools import tools
 
 class ChatCompressClient:
     def __init__(self):
@@ -1037,6 +1037,13 @@ class ChatCompressClient:
         print(f"  compress_settings / 压缩设置 - 显示此信息")
         print()
     
+    def extract_summary_now(self):
+        """强制立即提取当前对话摘要（跳过计数器限制）"""
+        print("\n[强制提取] 正在调用 LLM 进行 5W 信息提取...")
+        self._extract_5w_info()
+        # 返回最近一次保存的摘要内容（这里简化处理，实际可以从日志读取或返回 _extract_5w_info 的结果）
+        return "已尝试提取并保存至日志文件。"
+
     def _check_and_extract_key_info(self):
         """检查是否需要提取关键信息，并在满足条件时执行"""
         

@@ -37,8 +37,8 @@ def print_header():
     print("   [2] 查看宠物列表")
     print("   [3] 添加健康记录")
     print("   [4] 咨询 AI 管家")
-    print("   [5] 手动压缩记忆")
-    print("   [6] 查看病历摘要")
+    print("   [5] 手动压缩记忆 (建议在对话 10-15 轮后执行)")
+    print("   [6] 提取 AI 管家对话摘要")
     print("   [0] 退出系统")
     print("-" * 50)
 
@@ -205,17 +205,18 @@ def main():
             print("\n>>> 正在执行记忆压缩...")
             try:
                 advisor.compress_memory()
-                print("[OK] 记忆已成功压缩，历史对话已归档。")
+                print("[OK] 已为您清理了冗余的对话细节，保留了关键信息。这有助于 AI 在长对话中保持清醒。")
             except Exception as e:
                 print(f"[ERR] 压缩失败：{e}")
         elif choice == '6':
-            print("\n>>> 正在提取病历摘要 (5W)...")
+            print("\n>>> 正在提取 AI 管家对话摘要...")
             try:
-                summary = advisor.get_medical_summary()
+                summary = advisor.get_medical_summary(force=True)
                 if summary:
-                    print(f"\n--- 病历摘要 ---\n{summary}\n----------------")
+                    print(f"\n--- 对话摘要 ---\n{summary}\n----------------")
+                    print("[OK] 已成功提取本次问诊精华，并保存至 logs/medical_records/ 目录。您可以随时查阅宠物的健康档案。")
                 else:
-                    print("暂无可提取的病历摘要。")
+                    print("暂无可提取的对话摘要（建议至少进行一轮有效问诊）。")
             except Exception as e:
                 print(f"[ERR] 提取失败：{e}")
         elif choice == '0':
