@@ -100,6 +100,40 @@ class PetHealthAdvisor:
             logger.error(f"AI 健康顾问初始化失败: {e}")
             raise
     
+    def set_current_pet_context(self, pet_data: dict):
+        """
+        设置当前咨询宠物的上下文信息到 System Prompt 中。
+        
+        Args:
+            pet_data: 包含 name, species, breed, age, weight, gender, recent_records 的字典。
+        """
+        context_info = f"""
+【当前咨询对象档案】
+- 姓名：{pet_data.get('name', '未知')}
+- 物种：{pet_data.get('species', 'unknown')}
+- 品种：{pet_data.get('breed', '未知品种')}
+- 年龄：{pet_data.get('age', 0)} 岁
+- 体重：{pet_data.get('weight', 0)} kg
+- 性别：{'公' if pet_data.get('gender') == 'male' else '母' if pet_data.get('gender') == 'female' else '未知'}
+- 近期健康记录：{str(pet_data.get('recent_records', []))}
+
+【重要指令】
+1. 你已经知晓上述宠物的所有基本信息，无需再次向用户确认。
+2. 请基于这些信息进行诊断和建议。
+3. 如果用户提到的症状与档案不符，请以用户最新描述为准。
+4. 在回答时可以直接称呼宠物的名字，让对话更亲切自然。
+"""
+        
+        # 调用底层接口更新 System Prompt
+        self.client.set_system_prompt(context_info)
+        logger.info(f"已为宠物 {pet_data.get('name')} 注入上下文信息")
+    
+    def reset_context(self):
+        """重置上下文信息（用于切换宠物或退出咨询模式）"""
+        self.client.reset_system_prompt()
+        self.client.clear_history()
+        logger.info("已重置 AI 管家上下文")
+    
     # ==================== 核心业务方法 ====================
     
     def analyze_feeding_plan(self, pet_profile_dict: Dict[str, Any]) -> str:

@@ -36,6 +36,19 @@ class ChatCompressClient:
         
         # 日志模式配置
         self.debug_mode = False  # 全局日志模式开关
+        
+        # System Prompt 配置（用于上下文注入）
+        self.base_system_prompt = """你是一位经验丰富的宠物兽医助手，具有以下专业能力：
+1. 宠物健康诊断：根据症状提供初步诊断建议
+2. 喂养计划制定：根据年龄、体重、品种制定个性化喂养方案
+3. 健康管理咨询：提供预防保健、疫苗接种等建议
+
+【重要原则】
+- 如果用户提到宠物的基本信息，请基于这些信息给出专业建议
+- 始终保持温和专业的语气，避免引起宠物主人恐慌
+- 对于紧急情况，务必建议立即就医
+- 你不是真正的医生，仅提供参考建议，不能替代专业兽医诊断"""
+        self.system_prompt = self.base_system_prompt  # 当前生效的 system prompt
     
     def _register_tools(self):
         """注册可用工具"""
@@ -620,25 +633,9 @@ class ChatCompressClient:
         # 清理消息序列，避免连续相同角色的消息导致 Jinja 模板错误
         cleaned_history = self._clean_message_sequence(self.chat_history)
         
-        # 检查最后一条消息是否已经是当前用户的prompt，避免重复
+        # 使用动态的 system prompt（支持上下文注入）
         messages_list = [
-            {'role': 'system', 'content': '''你是一个友好的AI助手，具有以下能力：
-1. 文件操作：列出目录、读写文件、重命名、删除
-2. 网页访问：使用 curl 工具访问网页
-3. 知识库查询：当用户提到"文档仓库"、"文件仓库"、"知识库"、"查找文档"时，使用 anythingllm_query 工具查询本地文档
-
-重要提示：
-- 如果用户询问关于公司内部文档、政策、项目资料等问题，优先使用 anythingllm_query 工具
-- 如果用户询问通用知识，直接回答即可
-- 工具调用失败时，尝试其他方法或告知用户
-- 从知识库返回结果时，只展示与问题直接相关的内容，过滤掉明显不相关的文档
-
-【工具使用规范】
-- 当工具返回数据后，直接使用该数据回答用户问题
-- 不要重复调用相同的工具获取相同的数据
-- 工具返回的内容已经过格式化，直接使用，不要重新格式化
-- 不要添加原始数据中没有的信息或建议
-- 不要翻译或解释工具返回的内容，直接展示即可'''}
+            {'role': 'system', 'content': self.system_prompt}
         ]
         
         # 只有当chat_history的最后一条不是当前prompt时，才添加prompt
@@ -921,24 +918,9 @@ class ChatCompressClient:
         # 重新构建请求时禁用工具调用
         cleaned_history = self._clean_message_sequence(self.chat_history)
         
+        # 使用动态的 system prompt（支持上下文注入）
         messages_list = [
-            {'role': 'system', 'content': '''你是一个友好的AI助手，具有以下能力：
-1. 文件操作：列出目录、读写文件、重命名、删除
-2. 网页访问：使用 curl 工具访问网页
-3. 知识库查询：当用户提到"文档仓库"、"文件仓库"、"知识库"、"查找文档"时，使用 anythingllm_query 工具查询本地文档
-
-重要提示：
-- 如果用户询问关于公司内部文档、政策、项目资料等问题，优先使用 anythingllm_query 工具
-- 如果用户询问通用知识，直接回答即可
-- 工具调用失败时，尝试其他方法或告知用户
-- 从知识库返回结果时，只展示与问题直接相关的内容，过滤掉明显不相关的文档
-
-【工具使用规范】
-- 当工具返回数据后，直接使用该数据回答用户问题
-- 不要重复调用相同的工具获取相同的数据
-- 工具返回的内容已经过格式化，直接使用，不要重新格式化
-- 不要添加原始数据中没有的信息或建议
-- 不要翻译或解释工具返回的内容，直接展示即可'''}
+            {'role': 'system', 'content': self.system_prompt}
         ]
         
         # 检查最后一条消息是否已经是当前用户的prompt，避免重复
@@ -1010,6 +992,22 @@ class ChatCompressClient:
         """清空聊天历史"""
         self.chat_history = []
         print("聊天历史已清空")
+    
+    def set_system_prompt(self, additional_context: str):
+        """
+        动态更新 System Prompt，用于注入宠物档案。
+        
+        Args:
+            additional_context: 额外的上下文信息（如宠物档案）
+        """
+        # 策略：保留原有的角色设定，追加宠物档案
+        self.system_prompt = self.base_system_prompt + "\n\n" + additional_context
+        print(f"[系统] 已更新 System Prompt，注入宠物上下文信息")
+    
+    def reset_system_prompt(self):
+        """重置 System Prompt 为基础版本（用于切换宠物或退出咨询模式）"""
+        self.system_prompt = self.base_system_prompt
+        print(f"[系统] 已重置 System Prompt")
     
     def show_history_stats(self):
         """显示聊天历史统计信息"""

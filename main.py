@@ -160,6 +160,9 @@ def ai_consult_flow(system, advisor):
         "recent_records": target_pet.health_timeline.traverse_backward(5)
     }
     
+    # 【关键步骤】注入宠物上下文到 System Prompt
+    advisor.set_current_pet_context(pet_data)
+    
     # 进入连续对话子模式
     print("\n" + "=" * 60)
     print("   AI 宠物健康管家 - 连续对话模式")
@@ -184,6 +187,9 @@ def ai_consult_flow(system, advisor):
                 if summary:
                     print(f"\n--- 问诊记录 ---\n{summary}\n----------------")
                 print("[OK] 记录已保存，返回主菜单。")
+                
+                # 【关键步骤】重置上下文，防止信息串台
+                advisor.reset_context()
                 break
             
             # 2. 特殊指令检测
@@ -219,6 +225,9 @@ def ai_consult_flow(system, advisor):
             print("\n\n[系统] 检测到中断信号，正在保存记录...")
             advisor.get_medical_summary(force=True)
             print("[OK] 记录已保存，返回主菜单。")
+            
+            # 【关键步骤】重置上下文
+            advisor.reset_context()
             break
         except Exception as e:
             print(f"[ERR] 咨询过程中发生未知错误：{e}")
