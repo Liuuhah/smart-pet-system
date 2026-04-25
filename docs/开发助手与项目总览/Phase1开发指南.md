@@ -9,7 +9,6 @@
 - ✅ 完整的单元测试套件 (106/106 通过)
 - ✅ 核心数据结构实现（哈希表 + 双向链表）
 - ✅ 集成 Local LLM 的 AI 健康顾问
-- ✅ 完善的 CLI 交互与输入校验机制
 
 ---
 
@@ -262,18 +261,16 @@ class DoublyLinkedList:
 class PetProfile:
     """宠物档案类"""
     
-    def __init__(self, pet_id, name, breed, age, weight, gender="unknown", species="dog"):
+    def __init__(self, pet_id, name, breed, age, weight):
         """
         初始化宠物档案
         
         Args:
-            pet_id: 宠物唯一 ID
+            pet_id: 宠物唯一ID
             name: 宠物名字
             breed: 品种
             age: 年龄（岁）
             weight: 体重（公斤）
-            gender: 性别，"male" / "female" / "unknown"
-            species: 物种，"cat" / "dog" / "other"
         """
         self.pet_id = pet_id
         self.name = name
@@ -437,7 +434,7 @@ class SmartPetProfileSystem:
         """初始化系统"""
         self.profile_manager = PetProfileManager()
     
-    def register_pet(self, pet_id, name, breed, age, weight, gender="unknown", species="dog"):
+    def register_pet(self, pet_id, name, breed, age, weight):
         """
         注册新宠物
         
@@ -447,8 +444,6 @@ class SmartPetProfileSystem:
             breed: 品种
             age: 年龄
             weight: 体重
-            gender: 性别
-            species: 物种
             
         Returns:
             PetProfile对象
@@ -570,170 +565,78 @@ class SmartPetProfileSystem:
 
 ---
 
-## 📝 模块4：AI健康顾问
+## 📝 模块4：AI健康顾问（重构版）
 
 ### **文件：** `ai_assistant/pet_health_advisor.py`
 
 **架构设计亮点：**
-1. **接口隔离 (Interface Segregation)：** 所有方法接收简化的数据字典（DTO），不直接依赖 `PetProfile` 对象。这保证了未来底层存储从内存切换到 MySQL 时，AI 逻辑无需修改。
-2. **Prompt 工程服务化：** 所有 LLM Prompt 封装为独立方法（如 `_build_feeding_plan_prompt`），便于统一管理和 A/B 测试。
-3. **错误韧性 (Error Resilience)：** 完善的异常处理机制。当 LLM 调用失败时，系统会自动降级到基于规则的“基础建议”，确保用户体验不中断。
+1. **组合模式 (Composition)：** `PetHealthAdvisor` 内部实例化 `ChatCompressClient`，实现了业务逻辑与通信引擎的解耦。
+2. **医疗模式 (Medical Mode)：** 初始化时关闭 `auto_compress_enabled`，确保在长对话中不丢失关键的病情描述。
+3. **接口隔离 (Interface Segregation)：** 所有方法接收简化的数据字典（DTO），不直接依赖 `PetProfile` 对象。这保证了未来底层存储从内存切换到 MySQL 时，AI 逻辑无需修改。
+4. **手动管理接口：** 提供了 `compress_memory()` 和 `get_medical_summary()`，允许用户主动归档对话或提取 5W 病历摘要。
 
 ```python
 """
-AI宠物健康顾问
-
-集成LLM客户端，提供智能化健康建议
+AI宠物健康顾问 - 采用组合模式集成 LLM 客户端
 
 作者：刘同学
-日期：2026-04-15
-课程：《数据结构》项目
+日期：2026-04-16
+课程：《数据结构》项目 - Phase 1
 """
 
 import sys
 import os
+from typing import Dict, Any
 
 # 添加父目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from ai_assistant.chat_compress_client import ChatCompressClient
-from data_structures.hash_table import PetProfile
 
 
 class PetHealthAdvisor:
     """宠物健康AI顾问"""
     
     def __init__(self):
-        """初始化AI顾问"""
-        self.llm_client = ChatCompressClient()
-        print("✓ AI健康顾问已初始化")
+        """初始化AI顾问（开启医疗模式）"""
+        self.client = ChatCompressClient()
+        # 医疗模式下关闭自动压缩，防止丢失关键病情
+        self.client.auto_compress_enabled = False
+        print("✓ AI健康顾问已初始化 (医疗模式)")
     
-    def analyze_feeding_plan(self, pet_profile, current_plan):
+    def analyze_feeding_plan(self, pet_data: Dict[str, Any]) -> str:
         """
         分析喂食计划是否合理
         
         Args:
-            pet_profile: PetProfile对象
-            current_plan: 当前喂食计划描述
+            pet_data: 宠物数据字典 (DTO)，包含 name, species, age, weight 等
             
         Returns:
             str: AI分析结果
         """
-        prompt = f"""请分析以下宠物的喂食计划是否科学：
+        prompt = f"""请作为专业营养师分析以下宠物的喂养建议：
 
-宠物信息：
-- 名字：{pet_profile.name}
-- 品种：{pet_profile.breed}
-- 年龄：{pet_profile.age}岁
-- 体重：{pet_profile.weight}公斤
+宠物档案：
+- 名字：{pet_data.get('name')}
+- 物种：{pet_data.get('species')}
+- 品种：{pet_data.get('breed')}
+- 年龄：{pet_data.get('age')}岁
+- 体重：{pet_data.get('weight')}公斤
 
-当前喂食计划：
-{current_plan}
-
-请给出：
-1. 喂食次数是否合理
-2. 每次份量是否合适
-3. 营养搭配建议
-4. 需要注意的事项
-
-请用中文回答，控制在300字以内。"""
+请给出每日喂食量、频率及营养配比建议。请用中文回答。"""
         
-        print(f"\n[AI分析] 正在分析 {pet_profile.name} 的喂食计划...")
-        response = self.llm_client.send_request(prompt)
+        response, _ = self.client.send_request_stream(prompt, max_tokens=1024)
         return response
-    
-    def diagnose_symptoms(self, pet_profile, symptoms):
-        """
-        根据症状初步诊断
-        
-        Args:
-            pet_profile: PetProfile对象
-            symptoms: 症状描述
-            
-        Returns:
-            str: AI诊断建议
-        """
-        prompt = f"""宠物出现以下症状，请给出专业建议：
 
-宠物信息：
-- 品种：{pet_profile.breed}
-- 年龄：{pet_profile.age}岁
+    def compress_memory(self):
+        """手动触发记忆压缩"""
+        self.client._compress_chat_history()
+        print("✓ 记忆已成功压缩")
 
-症状描述：
-{symptoms}
-
-请给出：
-1. 可能的原因（列出3种可能性）
-2. 紧急程度评估（紧急/一般/观察）
-3. 家庭护理建议
-4. 是否需要立即就医
-
-注意：这只是AI初步建议，不能替代兽医诊断。
-
-请用中文回答，控制在400字以内。"""
-        
-        print(f"\n[AI诊断] 正在分析 {pet_profile.name} 的症状...")
-        response = self.llm_client.send_request(prompt)
-        return response
-    
-    def recommend_supplements(self, pet_profile):
-        """
-        推荐保健品
-        
-        Args:
-            pet_profile: PetProfile对象
-            
-        Returns:
-            str: AI推荐结果
-        """
-        prompt = f"""根据以下宠物信息，推荐适合的保健品：
-
-- 品种：{pet_profile.breed}
-- 年龄：{pet_profile.age}岁
-- 体重：{pet_profile.weight}公斤
-
-请推荐：
-1. 适合该年龄段的基础保健品
-2. 针对该品种的特殊需求
-3. 服用方法和剂量
-4. 注意事项
-
-注意：仅推送信息，不自动添加到喂食器。
-
-请用中文回答，控制在300字以内。"""
-        
-        print(f"\n[AI推荐] 正在为 {pet_profile.name} 推荐保健品...")
-        response = self.llm_client.send_request(prompt)
-        return response
-    
-    def generate_care_guide(self, pet_profile):
-        """
-        生成护理指南
-        
-        Args:
-            pet_profile: PetProfile对象
-            
-        Returns:
-            str: AI生成的护理指南
-        """
-        prompt = f"""为以下宠物生成全面的护理指南：
-
-- 品种：{pet_profile.breed}
-- 年龄：{pet_profile.age}岁
-- 体重：{pet_profile.weight}公斤
-
-请包括：
-1. 日常护理要点
-2. 饮食建议
-3. 运动需求
-4. 常见疾病预防
-5. 季节性注意事项
-
-请用中文回答，控制在500字以内。"""
-        
-        print(f"\n[AI指南] 正在为 {pet_profile.name} 生成护理指南...")
-        response = self.llm_client.send_request(prompt)
-        return response
+    def get_medical_summary(self):
+        """获取当前的病历摘要（5W信息）"""
+        # 这里调用底层的 5W 提取逻辑
+        return self.client._extract_5w_info()
 ```
 
 ---
@@ -771,21 +674,17 @@ from ai_assistant.pet_health_advisor import PetHealthAdvisor
 
 def show_menu():
     """显示主菜单"""
-    print("\n" + "="*60)
-    print("  智能宠物喂食管理系统 - Phase 1")
-    print("="*60)
-    print("1. 注册新宠物")
-    print("2. 查看所有宠物")
-    print("3. 搜索宠物")
-    print("4. 添加健康记录")
-    print("5. 查看最近健康记录")
-    print("6. 查看完整健康时间线")
-    print("7. AI分析喂食计划")
-    print("8. AI症状诊断")
-    print("9. AI推荐保健品")
-    print("10. AI生成护理指南")
-    print("0. 退出")
-    print("="*60)
+    print("\n" + "="*50)
+    print("   智能宠物喂食管理系统 (Phase 1)")
+    print("="*50)
+    print("   [1] 注册新宠物")
+    print("   [2] 查看宠物列表")
+    print("   [3] 添加健康记录")
+    print("   [4] 咨询 AI 管家")
+    print("   [5] 手动压缩记忆")
+    print("   [6] 查看病历摘要")
+    print("   [0] 退出系统")
+    print("-"*50)
 
 
 def main():
@@ -794,114 +693,35 @@ def main():
     advisor = PetHealthAdvisor()
     
     print("\n欢迎使用智能宠物喂食管理系统！")
-    print("提示：先注册宠物，然后可以添加健康记录和使用AI功能\n")
     
     while True:
         show_menu()
-        choice = input("\n请选择操作 (0-10): ").strip()
+        choice = input("\n请输入您的选择: ").strip()
         
         if choice == '0':
             print("\n感谢使用，再见！👋")
             break
-        
         elif choice == '1':
-            # 注册新宠物
-            name = input("请输入宠物姓名: ").strip()
-            print("请选择物种: 1.狗狗  2.猫咪  3.其他")
-            species_choice = input("请输入选项编号: ").strip()
-            species_map = {"1": "dog", "2": "cat", "3": "other"}
-            species = species_map.get(species_choice, "unknown")
-            breed = input("请输入品种: ").strip()
-            gender_map = {"1": "male", "2": "female"}
-            gender_choice = input("请选择性别: 1.公  2.母: ").strip()
-            gender = gender_map.get(gender_choice, "unknown")
-            try:
-                age = float(input("请输入年龄(岁): "))
-                weight = float(input("请输入体重(kg): "))
-                pet_count = system.get_pet_count()
-                pet_id = f"pet_{pet_count + 1:03d}"
-                system.register_pet(pet_id, name, breed, age, weight, gender, species)
-            except ValueError as e:
-                print(f"[ERR] 输入格式错误：{e}")
-        
-        elif choice == '2':
-            # 查看所有宠物
-            system.show_all_pets()
-        
-        elif choice == '3':
-            # 搜索宠物
-            keyword = input("请输入搜索关键词: ").strip()
-            system.search_pets(keyword)
-        
+            # 简化后的注册流程（详见实际 main.py 源码）
+            print("[功能演示] 进入注册流程...")
         elif choice == '4':
-            # 添加健康记录
-            pet_id = input("请输入宠物ID: ").strip()
-            date = input("请输入日期 (YYYY-MM-DD): ").strip()
-            print("事件类型：vaccine(疫苗) / checkup(体检) / illness(生病) / feeding(喂食)")
-            event_type = input("请输入事件类型: ").strip()
-            description = input("请输入描述: ").strip()
-            
-            system.add_health_record(pet_id, date, event_type, description)
-        
+            # AI 咨询流程
+            print("[功能演示] 连接 AI 管家...")
         elif choice == '5':
-            # 查看最近健康记录
-            pet_id = input("请输入宠物ID: ").strip()
-            count = int(input("要查看几条记录？(默认5): ").strip() or "5")
-            system.view_recent_records(pet_id, count)
-        
+            print("\n>>> 正在执行记忆压缩...")
+            try:
+                advisor.compress_memory()
+            except Exception as e:
+                print(f"[ERR] 压缩失败：{e}")
         elif choice == '6':
-            # 查看完整健康时间线
-            pet_id = input("请输入宠物ID: ").strip()
-            system.view_full_timeline(pet_id)
-        
-        elif choice == '7':
-            # AI分析喂食计划
-            pet_id = input("请输入宠物ID: ").strip()
-            pet = system.profile_manager.get_pet(pet_id)
-            if not pet:
-                print(f"错误：找不到宠物ID {pet_id}")
-                continue
-            
-            plan = input("请输入当前喂食计划（如：每天2次，每次50克）: ").strip()
-            result = advisor.analyze_feeding_plan(pet, plan)
-            print(f"\n{result}")
-        
-        elif choice == '8':
-            # AI症状诊断
-            pet_id = input("请输入宠物ID: ").strip()
-            pet = system.profile_manager.get_pet(pet_id)
-            if not pet:
-                print(f"错误：找不到宠物ID {pet_id}")
-                continue
-            
-            symptoms = input("请描述症状: ").strip()
-            result = advisor.diagnose_symptoms(pet, symptoms)
-            print(f"\n{result}")
-        
-        elif choice == '9':
-            # AI推荐保健品
-            pet_id = input("请输入宠物ID: ").strip()
-            pet = system.profile_manager.get_pet(pet_id)
-            if not pet:
-                print(f"错误：找不到宠物ID {pet_id}")
-                continue
-            
-            result = advisor.recommend_supplements(pet)
-            print(f"\n{result}")
-        
-        elif choice == '10':
-            # AI生成护理指南
-            pet_id = input("请输入宠物ID: ").strip()
-            pet = system.profile_manager.get_pet(pet_id)
-            if not pet:
-                print(f"错误：找不到宠物ID {pet_id}")
-                continue
-            
-            result = advisor.generate_care_guide(pet)
-            print(f"\n{result}")
-        
+            print("\n>>> 正在提取病历摘要 (5W)...")
+            try:
+                summary = advisor.get_medical_summary()
+                print(f"\n--- 病历摘要 ---\n{summary}\n----------------")
+            except Exception as e:
+                print(f"[ERR] 提取失败：{e}")
         else:
-            print("无效选择，请重新输入")
+            print("[提示] 其他功能请参考完整源码实现")
 
 
 if __name__ == "__main__":
@@ -923,11 +743,6 @@ if __name__ == "__main__":
 2. ✅ 集成AI健康顾问
 3. ✅ 完成主程序
 4. ✅ 端到端测试
-
-### **后续优化（已完成）**
-1. ✅ 修复 `main.py` 注册流程中的性别录入缺失问题。
-2. ✅ 强化代码封装性，移除对底层数据结构的直接访问。
-3. ✅ 完善异常处理，确保系统在 LLM 服务不可用时仍能稳定运行。
 
 ---
 

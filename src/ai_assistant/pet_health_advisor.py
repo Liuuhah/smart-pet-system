@@ -90,10 +90,12 @@ class PetHealthAdvisor:
     """
     
     def __init__(self):
-        """初始化 AI 健康顾问"""
+        """初始化 AI 健康顾问（采用组合模式）"""
         try:
-            self.llm_client = ChatCompressClient()
-            logger.info("AI 健康顾问初始化成功")
+            self.client = ChatCompressClient()
+            # 医疗模式下关闭自动压缩，防止丢失关键病情描述
+            self.client.auto_compress_enabled = False
+            logger.info("AI 健康顾问初始化成功 (医疗模式)")
         except Exception as e:
             logger.error(f"AI 健康顾问初始化失败: {e}")
             raise
@@ -147,7 +149,7 @@ class PetHealthAdvisor:
         # 调用 LLM
         try:
             logger.info(f"开始分析 {pet_profile_dict['name']} 的喂养计划...")
-            response, time_taken = self.llm_client.send_request_stream(prompt, max_tokens=1024)
+            response, time_taken = self.client.send_request_stream(prompt, max_tokens=1024)
             
             if not response:
                 raise RuntimeError("LLM 未返回有效内容")
@@ -198,7 +200,7 @@ class PetHealthAdvisor:
         # 调用 LLM
         try:
             logger.info(f"开始诊断 {pet_profile_dict['name']} 的症状...")
-            response, time_taken = self.llm_client.send_request_stream(prompt, max_tokens=1024)
+            response, time_taken = self.client.send_request_stream(prompt, max_tokens=1024)
             
             if not response:
                 raise RuntimeError("LLM 未返回有效内容")
@@ -250,7 +252,7 @@ class PetHealthAdvisor:
         # 调用 LLM
         try:
             logger.info(f"开始生成 {pet_profile_dict['name']} 的健康报告...")
-            response, time_taken = self.llm_client.send_request_stream(prompt, max_tokens=2048)
+            response, time_taken = self.client.send_request_stream(prompt, max_tokens=2048)
             
             if not response:
                 raise RuntimeError("LLM 未返回有效内容")
@@ -532,6 +534,16 @@ class PetHealthAdvisor:
         
         return advice
     
+    def compress_memory(self):
+        """手动触发记忆压缩（医疗模式下使用）"""
+        self.client._compress_chat_history()
+        logger.info("已执行手动记忆压缩")
+
+    def get_medical_summary(self):
+        """获取当前的病历摘要（5W 信息提取）"""
+        summary = self.client._extract_5w_info()
+        return summary
+
     # ==================== 工具方法 ====================
     
     def _validate_pet_profile(self, pet_profile_dict: Dict[str, Any], required_fields: List[str]):

@@ -399,7 +399,9 @@ class ChatCompressClient:
                     # 合并连续的同角色消息
                     prev_content = cleaned[-1].get('content', '')
                     curr_content = msg.get('content', '')
-                    cleaned[-1]['content'] = prev_content + '\n\n' + curr_content
+                    if isinstance(curr_content, dict):
+                        curr_content = json.dumps(curr_content)
+                    cleaned[-1]['content'] = prev_content + '\n\n' + str(curr_content)
                     print(f"[消息清理] 合并两个连续的 {role} 消息")
             else:
                 # 创建消息的副本，避免修改原始数据
@@ -552,7 +554,11 @@ class ChatCompressClient:
             return None
     
     def send_request_stream(self, prompt, max_tokens=4096, debug=None):
-        """发送流式请求，实时输出回复内容（带自动压缩功能）"""
+        """发送流式请求，实时输出回复内容（带自动压缩功能）
+        
+        注意：为了支持组合模式下的外部调用，此方法现在接收 prompt 字符串
+        并内部处理历史记录的组装。
+        """
         # 优先使用类的 debug_mode，如果参数为 None 则使用默认值
         if debug is None:
             debug = self.debug_mode

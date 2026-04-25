@@ -37,6 +37,8 @@ def print_header():
     print("   [2] 查看宠物列表")
     print("   [3] 添加健康记录")
     print("   [4] 咨询 AI 管家")
+    print("   [5] 手动压缩记忆")
+    print("   [6] 查看病历摘要")
     print("   [0] 退出系统")
     print("-" * 50)
 
@@ -199,11 +201,28 @@ def main():
             add_record_flow(system)
         elif choice == '4':
             ai_consult_flow(system, advisor)
+        elif choice == '5':
+            print("\n>>> 正在执行记忆压缩...")
+            try:
+                advisor.compress_memory()
+                print("[OK] 记忆已成功压缩，历史对话已归档。")
+            except Exception as e:
+                print(f"[ERR] 压缩失败：{e}")
+        elif choice == '6':
+            print("\n>>> 正在提取病历摘要 (5W)...")
+            try:
+                summary = advisor.get_medical_summary()
+                if summary:
+                    print(f"\n--- 病历摘要 ---\n{summary}\n----------------")
+                else:
+                    print("暂无可提取的病历摘要。")
+            except Exception as e:
+                print(f"[ERR] 提取失败：{e}")
         elif choice == '0':
             print("\n感谢使用智能宠物喂食管理系统，再见！👋")
             break
         else:
-            print("[ERR] 无效的选择，请输入 0-4 之间的数字。")
+            print("[ERR] 无效的选择，请输入 0-6 之间的数字。")
 
 
 if __name__ == "__main__":
