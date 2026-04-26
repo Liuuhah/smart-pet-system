@@ -2,6 +2,8 @@ import os
 import json
 import time
 import http.client
+import threading
+import sys
 from urllib.parse import urlparse
 import re
 from .tools import tools
@@ -48,6 +50,9 @@ class ChatCompressClient:
 - 始终保持温和专业的语气，避免引起宠物主人恐慌
 - 对于紧急情况，务必建议立即就医
 - 你不是真正的医生，仅提供参考建议，不能替代专业兽医诊断"""
+        
+        # 【流式中断】中断标志位
+        self.is_interrupted = False
         self.system_prompt = self.base_system_prompt  # 当前生效的 system prompt
     
     def _register_tools(self):
@@ -707,6 +712,17 @@ class ChatCompressClient:
         full_content = ''
         buffer = ''
         
+        # 【流式中断】重置中断标志
+        self.is_interrupted = False
+        
+        # 【流式中断】启动后台键盘监听线程（仅 Windows）
+        listener_thread = None
+        if sys.platform == 'win32':
+            listener_thread = threading.Thread(target=self._keyboard_listener, daemon=True)
+            listener_thread.start()
+            if debug:
+                print(f"[调试] 已启动键盘监听线程（按 Esc 可中断输出）")
+        
         # 工具调用缓冲区
         tool_calls_buffer = {}  # 按index存储tool_call的累积数据
         pending_tool_calls = []  # 存储完整的tool_call，等待执行
@@ -830,6 +846,25 @@ class ChatCompressClient:
                                 # 正常文本内容
                                 content = delta.get('content', '')
                                 if content:
+                                    # 【流式中断】检查是否被中断
+                                    if self.is_interrupted:
+                                        print("\n[已暂停输出]", end="", flush=True)
+                                        # 中断后，检查并执行待处理的工具调用（如果有）
+                                        if pending_tool_calls:
+                                            for tool_call_data in pending_tool_calls:
+                                                response_content = self._execute_pending_tool_call(
+                                                    tool_call_data, 
+                                                    data, 
+                                                    conn, 
+                                                    headers, 
+                                                    prompt
+                                                )
+                                                if response_content:
+                                                    tool_call_response = response_content
+                                            return tool_call_response if tool_call_response else full_content, False
+                                        else:
+                                            return full_content, False
+                                    
                                     print(content, end='', flush=True)
                                     full_content += content
                                     # 写入日志文件
@@ -1805,6 +1840,40 @@ class ChatCompressClient:
             print(f"[兜底归档] ❌ 保存失败: {e}")
             print(f"[兜底归档] 🔍 堆栈跟踪:\n{traceback.format_exc()}")
             return False
+    
+    def _keyboard_listener(self):
+        """
+        后台键盘监听线程（守护线程）
+        
+        设计原则：
+        - 极致轻量：使用 Python 内置的 msvcrt 库，零依赖、零安装
+        - 多线程守护：利用后台线程进行非阻塞监听，不打扰 AI 输出
+        - 优雅中断：按下 Esc 键即可瞬间停止打印
+        
+        注意：此方法仅在 Windows 平台有效
+        """
+        # 平台检测：仅支持 Windows
+        if sys.platform != 'win32':
+            return
+        
+        try:
+            import msvcrt
+            
+            while True:
+                # 非阻塞检测按键
+                if msvcrt.kbhit():
+                    key = msvcrt.getch()
+                    # Esc 键的 ASCII 码为 27
+                    if ord(key) == 27:
+                        self.is_interrupted = True
+                        break
+                
+                # 短暂休眠，避免 CPU 占用过高
+                time.sleep(0.05)
+                
+        except Exception as e:
+            # 静默失败，不影响主程序
+            pass
 
     def _generate_dialogue_summary(self, recent_messages):
         """生成对话摘要（用于失败记录）
