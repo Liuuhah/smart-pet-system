@@ -1240,21 +1240,35 @@ class ChatCompressClient:
             # 提取失败（信息不足），计数器继续累加（不重置）
             print(f"[关键信息提取] ⚠️ 提取失败，计数器保持为 {self.extract_message_counter}（下次在第 {self.extract_message_counter + self.extract_interval} 条消息时再次尝试）")
             
-            # 保存失败记录
-            self._save_failed_extraction(
-                round_number=len(self.chat_history) // 2,
-                reason=reason,
-                recent_messages=recent_messages
+            # 【修复】统一调用 _save_short_consultation_record 进行兜底归档
+            self._save_short_consultation_record(
+                reason=f"自动提取失败: {reason}",
+                recent_messages=recent_messages,
+                round_number=len(self.chat_history) // 2
             )
         
         elif status == "technical_error":
             # 技术故障，不改变累积状态
             print(f"[关键信息提取] ❌ 技术故障，保持当前状态")
             print(f"[关键信息提取] 建议：请检查网络连接或稍后重试")
+            
+            # 【修复】统一调用 _save_short_consultation_record 进行兜底归档
+            self._save_short_consultation_record(
+                reason=f"技术故障: {reason}",
+                recent_messages=recent_messages,
+                round_number=len(self.chat_history) // 2
+            )
         
         else:
             # 其他错误（格式错误等）
             print(f"[关键信息提取] ❌ 提取失败：{reason}")
+            
+            # 【修复】统一调用 _save_short_consultation_record 进行兜底归档
+            self._save_short_consultation_record(
+                reason=f"提取失败: {reason}",
+                recent_messages=recent_messages,
+                round_number=len(self.chat_history) // 2
+            )
     
     def _build_extract_prompt(self, recent_messages, is_cumulative=False):
         """构建 5W 信息提取的提示词
@@ -1591,17 +1605,48 @@ class ChatCompressClient:
                     role = msg.get('role', 'unknown')
                     content = msg.get('content', '')
                     
-                    # 对 assistant 的内容进行截断和总结
-                    if role == 'assistant':
-                        # 只保留前 50 个字符，后面加省略号
-                        if len(content) > 50:
-                            summary = content[:50].replace('\n', ' ').strip() + "..."
+                    # 【优化】内容过滤逻辑
+                    if role == 'tool':
+                        # 过滤 Tool Output：如果超过 200 字符，仅保留前 50 个字符
+                        if isinstance(content, str) and len(content) > 200:
+                            summary = content[:50].replace('\n', ' ').strip() + "... [工具返回结果已截断]"
                         else:
-                            summary = content.replace('\n', ' ').strip()
+                            summary = str(content).replace('\n', ' ').strip()
                         log_content += f"[{i}] {role}: {summary}\n"
+                    
+                    elif role == 'user':
+                        # 过滤 User Message：如果包含系统模板，只保留真实提问
+                        if isinstance(content, str) and '【宠物信息】' in content:
+                            # 提取【症状描述】之后的内容
+                            symptom_match = re.search(r'【症状描述】\s*\n(.+)', content, re.DOTALL)
+                            if symptom_match:
+                                real_question = symptom_match.group(1).strip()
+                                log_content += f"[{i}] {role}: {real_question}\n"
+                            else:
+                                # 如果没有找到症状描述，截取最后 100 字符
+                                log_content += f"[{i}] {role}: ...{content[-100:]}\n"
+                        else:
+                            # 普通用户消息，完整显示
+                            log_content += f"[{i}] {role}: {content}\n"
+                    
+                    elif role == 'assistant':
+                        # 对 assistant 的内容进行截断和总结
+                        if isinstance(content, str):
+                            if len(content) > 100:
+                                summary = content[:100].replace('\n', ' ').strip() + "..."
+                            else:
+                                summary = content.replace('\n', ' ').strip()
+                            log_content += f"[{i}] {role}: {summary}\n"
+                        else:
+                            log_content += f"[{i}] {role}: {str(content)[:100]}...\n"
+                    
                     else:
-                        # user 的消息完整显示
-                        log_content += f"[{i}] {role}: {content}\n"
+                        # 其他角色（如 system），跳过或简要显示
+                        if isinstance(content, str) and len(content) > 100:
+                            log_content += f"[{i}] {role}: [系统消息，已省略]\n"
+                        else:
+                            log_content += f"[{i}] {role}: {str(content)[:50]}\n"
+                
                 log_content += "\n"
             
             # 添加保存位置和后续操作
@@ -1621,8 +1666,18 @@ class ChatCompressClient:
             print(f"[日志保存] 成功保存到: {self.log_file_path}")
             return True
             
+        except IOError as e:
+            # 【增强】捕获具体的 IO 错误并打印堆栈
+            import traceback
+            print(f"[日志保存] ❌ 文件写入失败: {e}")
+            print(f"[日志保存] 📍 文件路径: {self.log_file_path}")
+            print(f"[日志保存] 🔍 堆栈跟踪:\n{traceback.format_exc()}")
+            return False
         except Exception as e:
+            # 【增强】捕获其他异常并打印堆栈
+            import traceback
             print(f"[日志保存] ❌ 保存失败: {e}")
+            print(f"[日志保存] 🔍 堆栈跟踪:\n{traceback.format_exc()}")
             return False
     
     def _save_failed_extraction(self, round_number, reason, recent_messages):
@@ -1737,8 +1792,18 @@ class ChatCompressClient:
             print(f"[兜底归档] ✅ 已成功保存简短问诊记录到: {self.log_file_path}")
             return True
             
+        except IOError as e:
+            # 【增强】捕获具体的 IO 错误并打印堆栈
+            import traceback
+            print(f"[兜底归档] ❌ 文件写入失败: {e}")
+            print(f"[兜底归档] 📍 文件路径: {self.log_file_path}")
+            print(f"[兜底归档] 🔍 堆栈跟踪:\n{traceback.format_exc()}")
+            return False
         except Exception as e:
+            # 【增强】捕获其他异常并打印堆栈
+            import traceback
             print(f"[兜底归档] ❌ 保存失败: {e}")
+            print(f"[兜底归档] 🔍 堆栈跟踪:\n{traceback.format_exc()}")
             return False
 
     def _generate_dialogue_summary(self, recent_messages):
