@@ -1,0 +1,49 @@
+[
+  {
+    "pet_id": "pet001",
+    "name": "豆豆",
+    "breed": "博美犬",
+    "age": 3,
+    "weight": 2.5,
+    "gender": "male",
+    "species": "dog",
+    "health_records": [
+      {
+        "date": "2026-04-20",
+        "type": "vaccine",
+        "desc": "接种狂犬疫苗",
+        "severity": "medium",
+        "details": {}
+      },
+      {
+        "date": "2026-04-25",
+        "type": "checkup",
+        "desc": "常规体检，体重正常",
+        "severity": "low",
+        "details": {
+          "hospital": "XX宠物医院"
+        }
+      }
+    ]
+  },
+  {
+    "pet_id": "pet002",
+    "name": "小花",
+    "breed": "布偶猫",
+    "age": 1,
+    "weight": 4.2,
+    "gender": "female",
+    "species": "cat",
+    "health_records": [
+      {
+        "date": "2026-04-15",
+        "type": "illness",
+        "desc": "感冒发烧，服药治疗",
+        "severity": "high",
+        "details": {
+          "medicine": "阿莫西林"
+        }
+      }
+    ]
+  }
+]

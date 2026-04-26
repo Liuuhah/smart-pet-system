@@ -57,3 +57,7 @@ logs/
 # Database
 *.db
 *.sqlite3
+
+# Data files (宠物档案持久化数据)
+data/*.json
+!data/pets_example.json

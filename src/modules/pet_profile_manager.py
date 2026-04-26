@@ -30,6 +30,8 @@
 """
 
 import sys
+import json
+import os
 from pathlib import Path
 
 # 配置导入路径
@@ -38,6 +40,10 @@ sys.path.insert(0, str(project_root))
 
 from data_structures.doubly_linked_list import DoublyLinkedList, HealthRecordNode
 from data_structures.hash_table import PetProfile, PetProfileManager
+
+# 【持久化】数据文件路径配置
+DATA_DIR = Path(__file__).parent.parent.parent / "data"
+PETS_FILE = DATA_DIR / "pets.json"
 
 
 class SmartPetProfileSystem:
@@ -58,6 +64,9 @@ class SmartPetProfileSystem:
     def __init__(self):
         """初始化智能宠物档案系统"""
         self.profile_manager = PetProfileManager()
+        
+        # 【持久化】自动加载历史数据
+        self._load_from_file()
     
     def register_pet(self, pet_id: str, name: str, breed: str, age: float, 
                      weight: float, gender: str = "unknown", species: str = "dog") -> PetProfile:
@@ -95,6 +104,10 @@ class SmartPetProfileSystem:
         self.profile_manager.add_pet(pet)
         
         print(f"[OK] 成功注册宠物：{pet}")
+        
+        # 【持久化】自动保存到文件
+        self._save_to_file()
+        
         return pet
     
     def add_health_record(self, pet_id: str, date: str, event_type: str, 
@@ -142,6 +155,10 @@ class SmartPetProfileSystem:
         pet.health_timeline.append(record)
         
         print(f"[OK] 已为 {pet.name} 添加健康记录：{description}")
+        
+        # 【持久化】自动保存到文件
+        self._save_to_file()
+        
         return True
     
     def view_recent_records(self, pet_id: str, count: int = 5) -> list:
@@ -332,6 +349,10 @@ class SmartPetProfileSystem:
             self.profile_manager.update_pet(pet_id, **kwargs)
             pet = self.profile_manager.get_pet(pet_id)
             print(f"[OK] 已更新宠物 {pet.name} 的信息")
+            
+            # 【持久化】自动保存到文件
+            self._save_to_file()
+            
             return True
         except ValueError as e:
             print(f"[ERR] 更新失败：{e}")
@@ -380,6 +401,10 @@ class SmartPetProfileSystem:
         self.profile_manager.remove_pet(pet_id)
         
         print(f"[OK] 已删除宠物 {pet_name} 及其所有健康记录")
+        
+        # 【持久化】自动保存到文件
+        self._save_to_file()
+        
         return True
     
     def show_all_pets(self) -> list:
@@ -414,6 +439,138 @@ class SmartPetProfileSystem:
             int: 宠物数量
         """
         return self.profile_manager.get_pet_count()
+    
+    # ==================== 【持久化】核心方法 ====================
+    
+    def _save_to_file(self):
+        """
+        将当前所有宠物档案保存到 JSON 文件
+        
+        设计原则：
+        - 无感同步：自动调用，用户无需手动保存
+        - 健壮性：捕获 I/O 错误，防止程序崩溃
+        - 结构还原：确保双向链表健康记录正确序列化
+        
+        时间复杂度：O(n) - n 为宠物数量
+        空间复杂度：O(n) - 需要构建完整的字典结构
+        """
+        try:
+            # 确保数据目录存在
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            
+            # 序列化所有宠物数据
+            pets_data = []
+            for pet in self.profile_manager.get_all_pets():
+                # 构建宠物字典
+                pet_dict = {
+                    'pet_id': pet.pet_id,
+                    'name': pet.name,
+                    'breed': pet.breed,
+                    'age': pet.age,
+                    'weight': pet.weight,
+                    'gender': pet.gender,
+                    'species': pet.species,
+                    'health_records': []
+                }
+                
+                # 序列化健康记录（双向链表 -> 列表）
+                if pet.health_timeline:
+                    records = pet.health_timeline.traverse_forward()
+                    for record in records:
+                        pet_dict['health_records'].append({
+                            'date': record['date'],
+                            'type': record['type'],
+                            'desc': record['desc'],
+                            'severity': record['severity'],
+                            'details': record.get('details', {})
+                        })
+                
+                pets_data.append(pet_dict)
+            
+            # 写入 JSON 文件（使用 utf-8 编码和美化格式）
+            with open(PETS_FILE, 'w', encoding='utf-8') as f:
+                json.dump(pets_data, f, ensure_ascii=False, indent=2)
+            
+            # print(f"[持久化] ✅ 已保存 {len(pets_data)} 只宠物到 {PETS_FILE}")
+            
+        except IOError as e:
+            print(f"[持久化] ⚠️ 保存失败: {e}")
+        except Exception as e:
+            print(f"[持久化] ⚠️ 未知错误: {e}")
+    
+    def _load_from_file(self):
+        """
+        从 JSON 文件加载历史宠物档案
+        
+        设计原则：
+        - 零侵入性：在 __init__ 中自动调用，不影响外部逻辑
+        - 结构还原：将 JSON 数据还原为 PetProfile 对象和 DoublyLinkedList
+        - 容错性：文件不存在时静默跳过，不报错
+        
+        时间复杂度：O(n*m) - n 为宠物数量，m 为每只宠物的平均记录数
+        空间复杂度：O(n*m) - 需要重建所有对象
+        """
+        try:
+            # 检查文件是否存在
+            if not PETS_FILE.exists():
+                # print("[持久化] 📝 未找到历史数据文件，初始化空系统")
+                return
+            
+            # 读取 JSON 文件
+            with open(PETS_FILE, 'r', encoding='utf-8') as f:
+                pets_data = json.load(f)
+            
+            if not pets_data:
+                # print("[持久化] 📝 历史数据为空，初始化空系统")
+                return
+            
+            # 重建宠物档案
+            loaded_count = 0
+            for pet_dict in pets_data:
+                try:
+                    # 创建 PetProfile 对象
+                    pet = PetProfile(
+                        pet_id=pet_dict['pet_id'],
+                        name=pet_dict['name'],
+                        breed=pet_dict['breed'],
+                        age=pet_dict['age'],
+                        weight=pet_dict['weight'],
+                        gender=pet_dict.get('gender', 'unknown'),
+                        species=pet_dict.get('species', 'dog')
+                    )
+                    
+                    # 初始化健康时间线
+                    pet.health_timeline = DoublyLinkedList()
+                    
+                    # 重建健康记录（列表 -> 双向链表）
+                    for record_dict in pet_dict.get('health_records', []):
+                        record = HealthRecordNode(
+                            date=record_dict['date'],
+                            event_type=record_dict['type'],
+                            description=record_dict['desc'],
+                            severity=record_dict.get('severity', 'low'),
+                            details=record_dict.get('details', {})
+                        )
+                        pet.health_timeline.append(record)
+                    
+                    # 添加到哈希表
+                    self.profile_manager.add_pet(pet)
+                    loaded_count += 1
+                    
+                except Exception as e:
+                    print(f"[持久化] ⚠️ 加载宠物 {pet_dict.get('pet_id', 'unknown')} 失败: {e}")
+                    continue
+            
+            if loaded_count > 0:
+                print(f"[持久化] ✅ 已加载 {loaded_count} 只宠物的历史数据")
+            
+        except FileNotFoundError:
+            # 文件不存在是正常情况，静默处理
+            pass
+        except json.JSONDecodeError as e:
+            print(f"[持久化] ⚠️ JSON 文件格式错误: {e}")
+        except Exception as e:
+            print(f"[持久化] ⚠️ 加载失败: {e}")
 
 
 # ==================== 测试代码 ====================
